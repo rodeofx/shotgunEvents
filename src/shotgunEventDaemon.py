@@ -190,7 +190,7 @@ class Registrar(object):
         self._module = module
 
     def registerCallback(self, sgScriptName, sgScriptKey, callback, args=None):
-        self._module.registerCallback(sgScriptName, sgScriptKey, callback, args=None)
+        self._module.registerCallback(sgScriptName, sgScriptKey, callback, args)
 
 
 class Callback(object):
