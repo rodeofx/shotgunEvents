@@ -1,0 +1,96 @@
+Shotgun Event Framework
+=======================
+
+Overview
+--------
+
+When you want to access the Shotgun event stream, the preferred way to do so it
+to poll the events table, get any new events, process them and repeat.
+
+A lot of stuff is required for this process to work successfully, stuff that may
+not have any direct bearing on the business rules that need to be applied.
+
+The role of the framework is to keep any tedious event polling related tasks out
+of the hands of the business logic implementor.
+
+The framework is a daemon process that runs on a server and polls the Shotgun
+event stream. When events are found, the daemon hands the events out to a series
+of registered plugins. Each plugin can process the event as it wishes.
+
+The daemon handles:
+
+- Registering plugins from one or more specified paths.
+- Reloading plugins when they change on disk.
+- Polling the Shotgun event stream.
+- Remembering the last processed event id.
+- Starting from the last processed event id on daemon startup.
+- Catching any connection errors.
+- Logging information to stdout, file or email as required.
+- Creating a connection to Shotgun that will be used by the callback.
+- Handing off events to registered callbacks.
+
+A plugin handles:
+
+- Registering any number of callbacks into the framework.
+- Processing a single event when one is provided by the framework.
+
+Registering a plugin
+--------------------
+
+When the daemon loads, it looks in defined plugin locations and tries to import
+any .py file. If a .py file has a *registerCallbacks* function, it is called,
+passing in a Registrar object. The Registrar is what is used to do the callback
+registrations.
+
+Here is an example of a *registerCallbacks* function:
+
+>>> def registerCallbacks(reg):
+...     reg.registerCallback('name', 'apiKey', doEvent)
+
+The registerCallback method of the Registrar object requires three arguments:
+
+- A script name (as per Shotgun)
+- A script API key (as per Shotgun)
+- A callback to provide events to for processing
+
+Optionally, you can also provide an argument that will be passed on to the
+processing callback.
+
+A callback
+----------
+
+A callback requires three arguments:
+
+- A shotgun instance with which to fetch any required information
+- The event to process
+- Any extra arguments provided at registration time
+
+Here is an example of a functional callback:
+
+>>> def doEvent(sg, event, args):
+...     logging.info('In event %s...' % str(event))
+
+Logging information
+-------------------
+
+All information can be passed out of the system (framework or plugins) by using
+the logging facilities of Python.
+
+Advantages of the framework
+---------------------------
+
+- Only deal with a single polling mechanism, not with polling in many different
+  scripts.
+- Minimize network and database load (only one poller that supplies event to
+  many event processing plugins).
+
+Going forward
+-------------
+
+Here is some stuff that could be changed or added going forward:
+
+- Parallelize the processing of events
+- Pass all data to the callbacks using a context object for better future
+  scalability.
+- Allow for late creation of the Shotgun connections on access by the callback
+- Make config reading more robust
