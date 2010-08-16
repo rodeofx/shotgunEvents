@@ -55,7 +55,7 @@ class Engine(object):
                     logging.debug('Read last event id (%d) from file.', self._lastEventId)
                 fh.close()
             except OSError, e:
-                logging.error('Could not load event id from file.\n\n%s', traceback.traceback.format_exc(e))
+                logging.error('Could not load event id from file.\n\n%s', traceback.format_exc(e))
 
         if self._lastEventId is None:
             result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=[{'column':'created_at', 'direction':'desc'}])
