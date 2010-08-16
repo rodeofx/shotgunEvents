@@ -62,7 +62,13 @@ _log = logging.getLogger('logArgs')
 
 
 def registerCallbacks(reg):
-    """Register all necessary or appropriate callbacks for this plugin."""
+    """Register all necessary or appropriate callbacks for this plugin.
+
+    The $DEMO_SCRIPT_NAME$ and $DEMO_API_KEY$ placeholders need to be changed
+    for appropriate values. All callbacks can share script names and api keys,
+    they can also all each have their own set of credentials or anything in
+    between.
+    """
     reg.registerCallback('$DEMO_SCRIPT_NAME$', '$DEMO_API_KEY$', logArgs, None)
 
 
