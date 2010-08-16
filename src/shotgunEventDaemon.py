@@ -213,7 +213,7 @@ class Callback(object):
 class CustomSMTPHandler(logging.handlers.SMTPHandler):
     LEVEL_SUBJECTS = {
         logging.ERROR: 'ERROR - Shotgun event daemon.',
-        logging.CRITICAL: 'CRITICAL - Shotgun event daemon.'
+        logging.CRITICAL: 'CRITICAL - Shotgun event daemon.',
     }
 
     def getSubject(self, record):
