@@ -121,15 +121,15 @@ class Engine(object):
 
         return []
 
-    def _saveEventId(self, id):
-        self._lastEventId = id
+    def _saveEventId(self, eid):
+        self._lastEventId = eid
         if self._eventIdFile is not None:
             try:
                 fh = open(self._eventIdFile, 'w')
-                fh.write('%d' % id)
+                fh.write('%d' % eid)
                 fh.close()
             except OSError, e:
-                logging.error('Can not write event id to %s.\n\n%s', self._eventIdFile, traceback.format_exc(e))
+                logging.error('Can not write event eid to %s.\n\n%s', self._eventIdFile, traceback.format_exc(e))
 
     def _removePidFile(self):
         if self._pidFile and os.path.exists(self._pidFile):
