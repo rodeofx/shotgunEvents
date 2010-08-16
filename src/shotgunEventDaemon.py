@@ -27,7 +27,7 @@ class Engine(object):
     def start(self):
         if self._pidFile:
             if os.path.exists(self._pidFile):
-                logging.critical('The pid file (%s) allready exists. Is another event sink running?' % self._pidFile)
+                logging.critical('The pid file (%s) allready exists. Is another event sink running?', self._pidFile)
                 return
 
             fh = open(self._pidFile, 'w')
@@ -41,7 +41,7 @@ class Engine(object):
         except KeyboardInterrupt, e:
             logging.warning('Keyboard interrupt. Cleaning up...')
         except Exception, e:
-            logging.critical('Crash!!!!! Unexpected error in main loop.\n\n%s' % traceback.format_exc(e))
+            logging.critical('Crash!!!!! Unexpected error in main loop.\n\n%s', traceback.format_exc(e))
         finally:
             self._removePidFile()
 
@@ -52,14 +52,14 @@ class Engine(object):
                 line = fh.readline()
                 if line.isdigit():
                     self._saveEventId(int(line))
-                    logging.debug('Read last event id (%d) from file.' % self._lastEventId)
+                    logging.debug('Read last event id (%d) from file.', self._lastEventId)
                 fh.close()
             except OSError, e:
-                logging.error('Could not load event id from file.\n\n%s' % traceback.traceback.format_exc(e))
+                logging.error('Could not load event id from file.\n\n%s', traceback.traceback.format_exc(e))
 
         if self._lastEventId is None:
             result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=[{'column':'created_at', 'direction':'desc'}])
-            logging.info('Read last event id (%d) from the Shotgun database.' % result['id'])
+            logging.info('Read last event id (%d) from the Shotgun database.', result['id'])
             self._saveEventId(result['id'])
 
     def _mainLoop(self):
@@ -129,14 +129,14 @@ class Engine(object):
                 fh.write('%d' % id)
                 fh.close()
             except OSError, e:
-                logging.error('Can not write event id to %s.\n\n%s' % (self._eventIdFile, traceback.format_exc(e)))
+                logging.error('Can not write event id to %s.\n\n%s', self._eventIdFile, traceback.format_exc(e))
 
     def _removePidFile(self):
         if self._pidFile and os.path.exists(self._pidFile):
             try:
                 os.unlink(self._pidFile)
             except OSError, e:
-                logging.error('Error removing pid file.\n\n%s' % traceback.format_exc(e))
+                logging.error('Error removing pid file.\n\n%s', traceback.format_exc(e))
 
 
 class Module(object):
@@ -165,7 +165,7 @@ class Module(object):
         try:
             module = imp.load_source(moduleName, self._path)
         except Exception, e:
-            logging.error('Could not load the module at %s.\n\n%s' % (self._path, traceback.format_exc(e)))
+            logging.error('Could not load the module at %s.\n\n%s', self._path, traceback.format_exc(e))
             return
 
         regFunc = getattr(module, 'registerCallbacks', None)
@@ -173,9 +173,9 @@ class Module(object):
             try:
                 regFunc(Registrar(self))
             except Exception, e:
-                logging.error('Error running register callback function from module at %s.\n\n%s' % (self._path, traceback.format_exc(e)))
+                logging.error('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc(e))
         else:
-            logging.error('Did not find a registerCallbacks function in module at %s.' % self._path)
+            logging.error('Did not find a registerCallbacks function in module at %s.', self._path)
 
     def registerCallback(self, sgScriptName, sgScriptKey, callback, args=None):
         global sg
@@ -204,10 +204,10 @@ class Callback(object):
 
     def process(self, event):
         try:
-            logging.debug('Processing event %d in callback %s.' % (event['id'], self._callback.__name__))
+            logging.debug('Processing event %d in callback %s.', event['id'], self._callback.__name__)
             self._callback(self._sg, event, self._args)
         except Exception, e:
-            logging.critical('An error occured processing an event in callback %s.\n\n%s' % (self._callback.__name__, traceback.format_exc(e)))
+            logging.critical('An error occured processing an event in callback %s.\n\n%s', self._callback.__name__, traceback.format_exc(e))
 
 
 class CustomSMTPHandler(logging.handlers.SMTPHandler):
