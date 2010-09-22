@@ -68,8 +68,10 @@ class Engine(object):
             self.load()
             for event in self._getNewEvents():
                 for module in self._modules.values():
-                    for callback in module:
-                        callback.process(event)
+                    if module.isActive:
+                        for callback in module:
+                            if callback.isActive():
+                                callback.process(event)
                 self._saveEventId(event['id'])
             time.sleep(1)
         logging.debug('Shuting down event processing loop.')
@@ -141,11 +143,15 @@ class Engine(object):
 
 class Module(object):
     def __init__(self, server, path):
+        self._active = True
         self._server = server
         self._path = path
         self._callbacks = []
         self._mtime = None
         self.load()
+
+    def isActive(self):
+        return self._active
 
     def load(self):
         dirname, basename = os.path.split(self._path)
@@ -161,10 +167,12 @@ class Module(object):
         logging.info(message)
         self._mtime = mtime
         self._callbacks = []
+        self._active = True
 
         try:
             module = imp.load_source(moduleName, self._path)
         except Exception, e:
+            self._active = False
             logging.error('Could not load the module at %s.\n\n%s', self._path, traceback.format_exc(e))
             return
 
@@ -174,8 +182,10 @@ class Module(object):
                 regFunc(Registrar(self))
             except Exception, e:
                 logging.error('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc(e))
+                self._active = False
         else:
             logging.error('Did not find a registerCallbacks function in module at %s.', self._path)
+            self._active = False
 
     def registerCallback(self, sgScriptName, sgScriptKey, callback, args=None):
         global sg
@@ -201,6 +211,7 @@ class Callback(object):
         self._sg = sg
         self._callback = callback
         self._args = args
+        self._active = True
 
     def process(self, event):
         try:
@@ -208,6 +219,10 @@ class Callback(object):
             self._callback(self._sg, event, self._args)
         except Exception, e:
             logging.critical('An error occured processing an event in callback %s.\n\n%s', self._callback.__name__, traceback.format_exc(e))
+            self._active = False
+
+    def isActive(self):
+        return self._active
 
 
 class CustomSMTPHandler(logging.handlers.SMTPHandler):
