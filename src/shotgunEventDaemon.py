@@ -38,10 +38,10 @@ class Engine(object):
 
         try:
             self._mainLoop()
-        except KeyboardInterrupt, e:
+        except KeyboardInterrupt, ex:
             logging.warning('Keyboard interrupt. Cleaning up...')
-        except Exception, e:
-            logging.critical('Crash!!!!! Unexpected error in main loop.\n\n%s', traceback.format_exc(e))
+        except Exception, ex:
+            logging.critical('Crash!!!!! Unexpected error in main loop.\n\n%s', traceback.format_exc(ex))
         finally:
             self._removePidFile()
 
@@ -54,8 +54,8 @@ class Engine(object):
                     self._saveEventId(int(line))
                     logging.debug('Read last event id (%d) from file.', self._lastEventId)
                 fh.close()
-            except OSError, e:
-                logging.error('Could not load event id from file.\n\n%s', traceback.format_exc(e))
+            except OSError, ex:
+                logging.error('Could not load event id from file.\n\n%s', traceback.format_exc(ex))
 
         if self._lastEventId is None:
             result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=[{'column':'created_at', 'direction':'desc'}])
@@ -118,8 +118,8 @@ class Engine(object):
 
         try:
             return self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
-        except (sg.ProtocolError, sg.ResponseError), e:
-            logging.warning(str(e))
+        except (sg.ProtocolError, sg.ResponseError), ex:
+            logging.warning(str(ex))
 
         return []
 
@@ -130,15 +130,15 @@ class Engine(object):
                 fh = open(self._eventIdFile, 'w')
                 fh.write('%d' % eid)
                 fh.close()
-            except OSError, e:
-                logging.error('Can not write event eid to %s.\n\n%s', self._eventIdFile, traceback.format_exc(e))
+            except OSError, ex:
+                logging.error('Can not write event eid to %s.\n\n%s', self._eventIdFile, traceback.format_exc(ex))
 
     def _removePidFile(self):
         if self._pidFile and os.path.exists(self._pidFile):
             try:
                 os.unlink(self._pidFile)
-            except OSError, e:
-                logging.error('Error removing pid file.\n\n%s', traceback.format_exc(e))
+            except OSError, ex:
+                logging.error('Error removing pid file.\n\n%s', traceback.format_exc(ex))
 
 
 class Module(object):
@@ -154,7 +154,7 @@ class Module(object):
         return self._active
 
     def load(self):
-        dirname, basename = os.path.split(self._path)
+        _, basename = os.path.split(self._path)
         moduleName = os.path.splitext(basename)[0]
 
         mtime = os.path.getmtime(self._path)
@@ -171,17 +171,17 @@ class Module(object):
 
         try:
             module = imp.load_source(moduleName, self._path)
-        except Exception, e:
+        except Exception, ex:
             self._active = False
-            logging.error('Could not load the module at %s.\n\n%s', self._path, traceback.format_exc(e))
+            logging.error('Could not load the module at %s.\n\n%s', self._path, traceback.format_exc(ex))
             return
 
         regFunc = getattr(module, 'registerCallbacks', None)
         if isinstance(regFunc, types.FunctionType):
             try:
                 regFunc(Registrar(self))
-            except Exception, e:
-                logging.error('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc(e))
+            except Exception, ex:
+                logging.error('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc(ex))
                 self._active = False
         else:
             logging.error('Did not find a registerCallbacks function in module at %s.', self._path)
@@ -204,11 +204,11 @@ class Registrar(object):
 
 
 class Callback(object):
-    def __init__(self, sg, callback, args=None):
+    def __init__(self, shotgun, callback, args=None):
         if not callable(callback):
             raise TypeError('The callback must be a callable object (function, method or callable class instance).')
 
-        self._sg = sg
+        self._shotgun = shotgun
         self._callback = callback
         self._args = args
         self._active = True
@@ -216,9 +216,9 @@ class Callback(object):
     def process(self, event):
         try:
             logging.debug('Processing event %d in callback %s.', event['id'], self._callback.__name__)
-            self._callback(self._sg, event, self._args)
-        except Exception, e:
-            logging.critical('An error occured processing an event in callback %s.\n\n%s', self._callback.__name__, traceback.format_exc(e))
+            self._callback(self._shotgun, event, self._args)
+        except Exception, ex:
+            logging.critical('An error occured processing an event in callback %s.\n\n%s', self._callback.__name__, traceback.format_exc(ex))
             self._active = False
 
     def isActive(self):
