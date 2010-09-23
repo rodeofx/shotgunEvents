@@ -68,7 +68,7 @@ class Engine(object):
             self.load()
             for event in self._getNewEvents():
                 for module in self._modules.values():
-                    if module.isActive:
+                    if module.isActive():
                         for callback in module:
                             if callback.isActive():
                                 callback.process(event)
