@@ -58,7 +58,8 @@ class Engine(object):
                 logging.error('Could not load event id from file.\n\n%s', traceback.format_exc(ex))
 
         if self._lastEventId is None:
-            result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=[{'column':'created_at', 'direction':'desc'}])
+            order = [{'column':'created_at', 'direction':'desc'}]
+            result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
             logging.info('Read last event id (%d) from the Shotgun database.', result['id'])
             self._saveEventId(result['id'])
 
