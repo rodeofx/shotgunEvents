@@ -41,7 +41,7 @@ class Engine(object):
         except KeyboardInterrupt, ex:
             logging.warning('Keyboard interrupt. Cleaning up...')
         except Exception, ex:
-            logging.critical('Crash!!!!! Unexpected error in main loop.\n\n%s', traceback.format_exc(ex))
+            logging.critical('Crash!!!!! Unexpected error (%s) in main loop.\n\n%s', type(e), traceback.format_exc(ex))
         finally:
             self._removePidFile()
 
