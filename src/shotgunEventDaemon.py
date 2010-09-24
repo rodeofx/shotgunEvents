@@ -172,7 +172,7 @@ class Module(object):
 
         try:
             module = imp.load_source(moduleName, self._path)
-        except Exception, ex:
+        except BaseException, ex:
             self._active = False
             logging.error('Could not load the module at %s.\n\n%s', self._path, traceback.format_exc(ex))
             return
@@ -181,7 +181,7 @@ class Module(object):
         if isinstance(regFunc, types.FunctionType):
             try:
                 regFunc(Registrar(self))
-            except Exception, ex:
+            except BaseException, ex:
                 logging.error('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc(ex))
                 self._active = False
         else:
@@ -218,7 +218,7 @@ class Callback(object):
         try:
             logging.debug('Processing event %d in callback %s.', event['id'], self._callback.__name__)
             self._callback(self._shotgun, event, self._args)
-        except Exception, ex:
+        except BaseException, ex:
             logging.critical('An error occured processing an event in callback %s.\n\n%s', self._callback.__name__, traceback.format_exc(ex))
             self._active = False
 
