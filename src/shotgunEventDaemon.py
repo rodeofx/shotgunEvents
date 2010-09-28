@@ -73,6 +73,10 @@ class Engine(object):
                         for callback in module:
                             if callback.isActive():
                                 callback.process(event)
+                            else:
+                                logging.debug('Skipping inactive callback %s.', str(callback))
+                    else:
+                        logging.debug('Skipping inactive module %s.', str(module))
                 self._saveEventId(event['id'])
             time.sleep(1)
         logging.debug('Shuting down event processing loop.')
@@ -144,6 +148,7 @@ class Engine(object):
 
 class Module(object):
     def __init__(self, server, path):
+        self._moduleName = None
         self._active = True
         self._server = server
         self._path = path
@@ -156,13 +161,13 @@ class Module(object):
 
     def load(self):
         _, basename = os.path.split(self._path)
-        moduleName = os.path.splitext(basename)[0]
+        self._moduleName = os.path.splitext(basename)[0]
 
         mtime = os.path.getmtime(self._path)
         if self._mtime is None:
-            self._load(moduleName, mtime, 'Loading module at %s' % self._path)
+            self._load(self._moduleName, mtime, 'Loading module at %s' % self._path)
         elif self._mtime < mtime:
-            self._load(moduleName, mtime, 'Reloading module at %s' % self._path)
+            self._load(self._moduleName, mtime, 'Reloading module at %s' % self._path)
 
     def _load(self, moduleName, mtime, message):
         logging.info(message)
@@ -182,10 +187,10 @@ class Module(object):
             try:
                 regFunc(Registrar(self))
             except BaseException, ex:
-                logging.error('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc(ex))
+                logging.critical('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc(ex))
                 self._active = False
         else:
-            logging.error('Did not find a registerCallbacks function in module at %s.', self._path)
+            logging.critical('Did not find a registerCallbacks function in module at %s.', self._path)
             self._active = False
 
     def registerCallback(self, sgScriptName, sgScriptKey, callback, args=None):
@@ -195,6 +200,8 @@ class Module(object):
     def __iter__(self):
         return self._callbacks.__iter__()
 
+    def __str__(self):
+        return self._moduleName
 
 class Registrar(object):
     def __init__(self, module):
@@ -224,6 +231,9 @@ class Callback(object):
 
     def isActive(self):
         return self._active
+
+    def __str__(self):
+        return self._callback.__name__
 
 
 class CustomSMTPHandler(logging.handlers.SMTPHandler):
