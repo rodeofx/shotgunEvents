@@ -265,6 +265,12 @@ def main():
     loggingLevel = config.getint('daemon', 'logging')
 
     server = config.get('shotgun', 'server')
+    username = None
+    password = None
+    if config.has_option('emails', 'username'):
+        username = config.get('emails', 'username')
+    if config.has_option('emails', 'password'):
+        password = config.get('emails', 'password')
     name = config.get('shotgun', 'name')
     key = config.get('shotgun', 'key')
 
@@ -291,7 +297,10 @@ Function: %(funcName)s
 Line: %(lineno)d
 
 %(message)s""")
-        mailHandler = CustomSMTPHandler(smtpServer, fromAddr, toAddrs, subject)
+        if username and password:
+            mailHandler = CustomSMTPHandler(smtpServer, fromAddr, toAddrs, subject, (username, password))
+        else:
+            mailHandler = CustomSMTPHandler(smtpServer, fromAddr, toAddrs, subject)
         mailHandler.setLevel(logging.ERROR)
         mailHandler.setFormatter(mailFormatter)
         logger.addHandler(mailHandler)
