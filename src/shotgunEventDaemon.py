@@ -5,6 +5,7 @@ import imp
 import logging
 import logging.handlers
 import os
+import socket
 import sys
 import time
 import types
@@ -121,10 +122,15 @@ class Engine(object):
         fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity']
         order = [{'column':'created_at', 'direction':'asc'}]
 
-        try:
-            return self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
-        except (sg.ProtocolError, sg.ResponseError), ex:
-            logging.warning(str(ex))
+        while True:
+            try:
+                events = self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
+                return events
+            except (sg.ProtocolError, sg.ResponseError), ex:
+                logging.warning(str(ex))
+                time.sleep(60)
+            except socket.timeout, ex:
+                logging.error('Socket timeout. Will retry. %s', str(ex))
 
         return []
 
@@ -317,6 +323,9 @@ Line: %(lineno)d
 
     # Notify which version of shotgun api we are using
     logging.debug('Using Shotgun version %s' % sg.__version__)
+
+    # TODO: Take value from config
+    socket.setdefaulttimeout(60)
 
     # Start event processing
     engine = Engine(pluginPaths, server, name, key, pidFile, eventIdFile)
