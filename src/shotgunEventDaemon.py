@@ -315,6 +315,9 @@ Line: %(lineno)d
         mailHandler.setFormatter(mailFormatter)
         logger.addHandler(mailHandler)
 
+    # Notify which version of shotgun api we are using
+    logging.debug('Using Shotgun version %s' % sg.__version__)
+
     # Start event processing
     engine = Engine(pluginPaths, server, name, key, pidFile, eventIdFile)
     engine.start()
