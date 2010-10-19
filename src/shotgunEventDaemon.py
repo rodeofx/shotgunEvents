@@ -119,7 +119,7 @@ class Engine(object):
 
     def _getNewEvents(self):
         filters = [['id', 'greater_than', self._lastEventId]]
-        fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity']
+        fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project']
         order = [{'column':'created_at', 'direction':'asc'}]
 
         while True:
