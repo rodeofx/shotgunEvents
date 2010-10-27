@@ -5,6 +5,7 @@ import imp
 import logging
 import logging.handlers
 import os
+import pprint
 import socket
 import sys
 import time
@@ -15,20 +16,104 @@ import daemonizer
 import shotgun_api3 as sg
 
 
+class LogFactory(object):
+    EMAIL_FORMAT_STRING = """Time: %(asctime)s
+Logger: %(name)s
+Path: %(pathname)s
+Function: %(funcName)s
+Line: %(lineno)d
+
+%(message)s"""
+
+    def __init__(self, config):
+        self._loggers = []
+
+        # Get configuration options
+        self._smtpServer = config.get('emails', 'server')
+        self._fromAddr = config.get('emails', 'from')
+        self._toAddrs = [s.strip() for s in config.get('emails', 'to').split(',')]
+        self._subject = config.get('emails', 'subject')
+        self._username = None
+        self._password = None
+        if config.has_option('emails', 'username'):
+            self._username = config.get('emails', 'username')
+        if config.has_option('emails', 'password'):
+            self._password = config.get('emails', 'password')
+        self._loggingLevel = config.getint('daemon', 'logging')
+
+        # Setup the file logger at the root
+        loggingPath = config.get('daemon', 'logFile')
+        logger = self.getLogger()
+        logger.setLevel(self._loggingLevel)
+        handler = logging.handlers.TimedRotatingFileHandler(loggingPath, 'midnight', backupCount=10)
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+        logger.addHandler(handler)
+
+    def getLogger(self, namespace=None, emails=False):
+        if namespace:
+            logger = logging.getLogger(namespace)
+        else:
+            logger = logging.getLogger()
+
+        # Configure the logger
+        if emails is False:
+            self.removeHandlersFromLogger(logger, logging.handlers.SMTPHandler)
+        if emails is True:
+            self.addMailHandlerToLogger(logger, self._toAddrs)
+        elif isinstance(emails, (list, tuple)):
+            self.addMailHandlerToLogger(logger, emails)
+        elif emails is not False:
+            msg = 'Argument emails should be True to use the default addresses or a list of recipient addresses. Got %s.'
+            raise ValueError(msg % type(emails))
+
+        return logger
+
+    @staticmethod
+    def removeHandlersFromLogger(logger, handlerTypes=None):
+        for handler in logger.handlers:
+            if handlerTypes is None or isinstance(handler, handlerTypes):
+                logger.removeHandler(handler)
+
+    def addMailHandlerToLogger(self, logger, toAddrs):
+        self.removeHandlersFromLogger(logger, logging.handlers.SMTPHandler)
+
+        if self._smtpServer and self._fromAddr and toAddrs and self._subject:
+            if self._username and self._password:
+                mailHandler = CustomSMTPHandler(self._smtpServer, self._fromAddr, toAddrs, self._subject, (self._username, self._password))
+            else:
+                mailHandler = CustomSMTPHandler(self._smtpServer, self._fromAddr, toAddrs, self._subject)
+
+            mailHandler.setLevel(logging.ERROR)
+            mailFormatter = logging.Formatter(self.EMAIL_FORMAT_STRING)
+            mailHandler.setFormatter(mailFormatter)
+
+            logger.addHandler(mailHandler)
+
+
 class Engine(object):
-    def __init__(self, pluginPaths, server, name, key, pidFile=None, eventIdFile=None):
+    def __init__(self, logFactory, config):
         self._modules = {}
-        self._paths = pluginPaths
-        self._server = server
-        self._sg = sg.Shotgun(self._server, name, key)
-        self._pidFile = pidFile
-        self._eventIdFile = eventIdFile
+        self._logFactory = logFactory
+        self._log = self._logFactory.getLogger('engine', emails=True)
         self._lastEventId = None
+
+        # Get config values
+        self._paths = [s.strip() for s in config.get('plugins', 'paths').split(',')]
+        self._server = config.get('shotgun', 'server')
+        self._sg = sg.Shotgun(self._server, config.get('shotgun', 'name'), config.get('shotgun', 'key'))
+        self._pidFile = config.get('daemon', 'pidFile')
+        self._eventIdFile = config.get('daemon', 'eventIdFile')
+
+    def getShotgunURL(self):
+        return self._server
+
+    def getPluginLogger(self, namespace, emails=False):
+        return self._logFactory.getLogger('plugin.' + namespace, emails)
 
     def start(self):
         if self._pidFile:
             if os.path.exists(self._pidFile):
-                logging.critical('The pid file (%s) allready exists. Is another event sink running?', self._pidFile)
+                self._log.critical('The pid file (%s) allready exists. Is another event sink running?', self._pidFile)
                 return
 
             fh = open(self._pidFile, 'w')
@@ -40,9 +125,9 @@ class Engine(object):
         try:
             self._mainLoop()
         except KeyboardInterrupt, ex:
-            logging.warning('Keyboard interrupt. Cleaning up...')
+            self._log.warning('Keyboard interrupt. Cleaning up...')
         except Exception, ex:
-            logging.critical('Crash!!!!! Unexpected error (%s) in main loop.\n\n%s', type(e), traceback.format_exc(ex))
+            self._log.critical('Crash!!!!! Unexpected error (%s) in main loop.\n\n%s', type(ex), traceback.format_exc(ex))
         finally:
             self._removePidFile()
 
@@ -53,19 +138,19 @@ class Engine(object):
                 line = fh.readline()
                 if line.isdigit():
                     self._saveEventId(int(line))
-                    logging.debug('Read last event id (%d) from file.', self._lastEventId)
+                    self._log.debug('Read last event id (%d) from file.', self._lastEventId)
                 fh.close()
             except OSError, ex:
-                logging.error('Could not load event id from file.\n\n%s', traceback.format_exc(ex))
+                self._log.error('Could not load event id from file.\n\n%s', traceback.format_exc(ex))
 
         if self._lastEventId is None:
             order = [{'column':'created_at', 'direction':'desc'}]
             result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
-            logging.info('Read last event id (%d) from the Shotgun database.', result['id'])
+            self._log.info('Read last event id (%d) from the Shotgun database.', result['id'])
             self._saveEventId(result['id'])
 
     def _mainLoop(self):
-        logging.debug('Starting the event processing loop.')
+        self._log.debug('Starting the event processing loop.')
         while self._checkContinue():
             self.load()
             for event in self._getNewEvents():
@@ -75,16 +160,16 @@ class Engine(object):
                             if callback.isActive():
                                 callback.process(event)
                             else:
-                                logging.debug('Skipping inactive callback %s.', str(callback))
+                                self._log.debug('Skipping inactive callback %s.', str(callback))
                     else:
-                        logging.debug('Skipping inactive module %s.', str(module))
+                        self._log.debug('Skipping inactive module %s.', str(module))
                 self._saveEventId(event['id'])
             time.sleep(1)
-        logging.debug('Shuting down event processing loop.')
+        self._log.debug('Shuting down event processing loop.')
 
     def stop(self):
         self._removePidFile()
-        logging.info('Stopping gracefully once current events have been processed.')
+        self._log.info('Stopping gracefully once current events have been processed.')
 
     def load(self):
         newModules = {}
@@ -102,7 +187,7 @@ class Engine(object):
                     newModules[filePath] = self._modules[filePath]
                     newModules[filePath].load()
                 else:
-                    module = Module(self._server, filePath)
+                    module = Module(self, filePath)
                     module.load()
                     newModules[filePath] = module
 
@@ -127,10 +212,10 @@ class Engine(object):
                 events = self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
                 return events
             except (sg.ProtocolError, sg.ResponseError), ex:
-                logging.warning(str(ex))
+                self._log.warning(str(ex))
                 time.sleep(60)
             except socket.timeout, ex:
-                logging.error('Socket timeout. Will retry. %s', str(ex))
+                self._log.error('Socket timeout. Will retry. %s', str(ex))
 
         return []
 
@@ -142,21 +227,23 @@ class Engine(object):
                 fh.write('%d' % eid)
                 fh.close()
             except OSError, ex:
-                logging.error('Can not write event eid to %s.\n\n%s', self._eventIdFile, traceback.format_exc(ex))
+                self._log.error('Can not write event eid to %s.\n\n%s', self._eventIdFile, traceback.format_exc(ex))
 
     def _removePidFile(self):
         if self._pidFile and os.path.exists(self._pidFile):
             try:
                 os.unlink(self._pidFile)
             except OSError, ex:
-                logging.error('Error removing pid file.\n\n%s', traceback.format_exc(ex))
+                self._log.error('Error removing pid file.\n\n%s', traceback.format_exc(ex))
 
 
 class Module(object):
-    def __init__(self, server, path):
+    def __init__(self, engine, path):
         self._moduleName = None
         self._active = True
-        self._server = server
+        self._engine = engine
+        self._logger = None
+        self._emails = False
         self._path = path
         self._callbacks = []
         self._mtime = None
@@ -164,6 +251,17 @@ class Module(object):
 
     def isActive(self):
         return self._active
+
+    def setEmails(self, emails=False):
+        self._logger = None
+        self._emails = emails
+
+    def getLogger(self):
+        if self._logger is None:
+            # Use our specified email addresses or the default email addresses.
+            emails = self._emails or True
+            self._logger = self._engine.getPluginLogger(self._moduleName, emails)
+        return self._logger
 
     def load(self):
         _, basename = os.path.split(self._path)
@@ -176,7 +274,7 @@ class Module(object):
             self._load(self._moduleName, mtime, 'Reloading module at %s' % self._path)
 
     def _load(self, moduleName, mtime, message):
-        logging.info(message)
+        self.getLogger().info(message)
         self._mtime = mtime
         self._callbacks = []
         self._active = True
@@ -185,7 +283,7 @@ class Module(object):
             module = imp.load_source(moduleName, self._path)
         except BaseException, ex:
             self._active = False
-            logging.error('Could not load the module at %s.\n\n%s', self._path, traceback.format_exc(ex))
+            self._logger.error('Could not load the module at %s.\n\n%s', self._path, traceback.format_exc(ex))
             return
 
         regFunc = getattr(module, 'registerCallbacks', None)
@@ -193,15 +291,17 @@ class Module(object):
             try:
                 regFunc(Registrar(self))
             except BaseException, ex:
-                logging.critical('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc(ex))
+                self.getLogger().critical('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc(ex))
                 self._active = False
         else:
-            logging.critical('Did not find a registerCallbacks function in module at %s.', self._path)
+            self.getLogger().critical('Did not find a registerCallbacks function in module at %s.', self._path)
             self._active = False
 
     def registerCallback(self, sgScriptName, sgScriptKey, callback, args=None):
         global sg
-        self._callbacks.append(Callback(sg.Shotgun(self._server, sgScriptName, sgScriptKey), callback, args))
+        sgConnection = sg.Shotgun(self._engine.getShotgunURL(), sgScriptName, sgScriptKey)
+        logger = self._engine.getPluginLogger(self._moduleName + '.' + callback.__name__, self._emails)
+        self._callbacks.append(Callback(callback, sgConnection, logger, args))
 
     def __iter__(self):
         return self._callbacks.__iter__()
@@ -209,30 +309,41 @@ class Module(object):
     def __str__(self):
         return self._moduleName
 
+
 class Registrar(object):
     def __init__(self, module):
         self._module = module
+
+    def getLogger(self):
+        return self._module.getLogger()
+
+    logger = property(getLogger)
+
+    def setEmails(self, *emails):
+        self._module.setEmails(emails)
 
     def registerCallback(self, sgScriptName, sgScriptKey, callback, args=None):
         self._module.registerCallback(sgScriptName, sgScriptKey, callback, args)
 
 
 class Callback(object):
-    def __init__(self, shotgun, callback, args=None):
+    def __init__(self, callback, shotgun, logger, args=None):
         if not callable(callback):
             raise TypeError('The callback must be a callable object (function, method or callable class instance).')
 
         self._shotgun = shotgun
         self._callback = callback
+        self._logger = logger
         self._args = args
         self._active = True
 
     def process(self, event):
         try:
-            logging.debug('Processing event %d in callback %s.', event['id'], self._callback.__name__)
-            self._callback(self._shotgun, event, self._args)
+            self._logger.debug('Processing event %d.', event['id'])
+            self._callback(self._shotgun, self._logger, event, self._args)
         except BaseException, ex:
-            logging.critical('An error occured processing an event in callback %s.\n\n%s', self._callback.__name__, traceback.format_exc(ex))
+            msg = 'An error occured processing an event.\n\nEvent Data:\n%s\n\n%s'
+            self._logger.critical(msg, pprint.pformat(event), traceback.format_exc(ex))
             self._active = False
 
     def isActive(self):
@@ -271,64 +382,20 @@ def main():
         handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
         logging.getLogger().addHandler(handler)
 
+    # TODO: Take value from config
+    socket.setdefaulttimeout(60)
+
     # Read/parse the config
     config = ConfigParser.ConfigParser()
     config.read(configPath)
 
-    pidFile = config.get('daemon', 'pidFile')
-    eventIdFile = config.get('daemon', 'eventIdFile')
-    loggingPath = config.get('daemon', 'logFile')
-    loggingLevel = config.getint('daemon', 'logging')
-
-    server = config.get('shotgun', 'server')
-    username = None
-    password = None
-    if config.has_option('emails', 'username'):
-        username = config.get('emails', 'username')
-    if config.has_option('emails', 'password'):
-        password = config.get('emails', 'password')
-    name = config.get('shotgun', 'name')
-    key = config.get('shotgun', 'key')
-
-    pluginPaths = [s.strip() for s in config.get('plugins', 'paths').split(',')]
-
-    smtpServer = config.get('emails', 'server')
-    fromAddr = config.get('emails', 'from')
-    toAddrs = [s.strip() for s in config.get('emails', 'to').split(',')]
-    subject = config.get('emails', 'subject')
-
-    # Setup the file logger
-    logger = logging.getLogger()
-    logger.setLevel(loggingLevel)
-    handler = logging.handlers.TimedRotatingFileHandler(loggingPath, 'midnight', backupCount=10)
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-    logger.addHandler(handler)
-
-    # Setup the mail logger
-    if smtpServer and fromAddr and toAddrs and subject:
-        mailFormatter = logging.Formatter("""Time: %(asctime)s
-Logger: %(name)s
-Path: %(pathname)s
-Function: %(funcName)s
-Line: %(lineno)d
-
-%(message)s""")
-        if username and password:
-            mailHandler = CustomSMTPHandler(smtpServer, fromAddr, toAddrs, subject, (username, password))
-        else:
-            mailHandler = CustomSMTPHandler(smtpServer, fromAddr, toAddrs, subject)
-        mailHandler.setLevel(logging.ERROR)
-        mailHandler.setFormatter(mailFormatter)
-        logger.addHandler(mailHandler)
+    # Prep logging.
+    logFactory = LogFactory(config)
 
     # Notify which version of shotgun api we are using
-    logging.debug('Using Shotgun version %s' % sg.__version__)
+    logFactory.getLogger().debug('Using Shotgun version %s' % sg.__version__)
 
-    # TODO: Take value from config
-    socket.setdefaulttimeout(60)
-
-    # Start event processing
-    engine = Engine(pluginPaths, server, name, key, pidFile, eventIdFile)
+    engine = Engine(logFactory, config)
     engine.start()
 
     return 0

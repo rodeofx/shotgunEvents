@@ -37,6 +37,7 @@ Callbacks
 Any callback function should take three arguments.
 
     sg: a Shotgun object instance onto which you can do queries.
+    logger: a Logger object from Python's logging library.
     event: an event object to process.
     arg: an arbitrary argument that was provided at callback registration.
 
@@ -45,21 +46,23 @@ Printing out information
 ========================
 
 Using the print statement in an event plugin is not recommended. It is prefered
-you use the standard logging module from the Python standard library, like so:
+you use the standard logging module from the Python standard library. A logger
+object will be provided to your various functions.
 
-    > import logging
-    > _log = logging.getLogger('myPluginName')
-    > _log.info('info message')
+    > def registerCallbacks(reg):
+    >     reg.setEmails('root@domain.com', 'tech@domain.com') # Optional
+    >     reg.logger.info('Info')
+    >     reg.logger.error('Error') # ERROR and above will be sent via email.
+
+    and:
+
+    > def myCallback(sg, logger, event)
+    >     logger.info('Info message')
 
 If the event framework is running as a daemon this will be logged to a file
 otherwise it will be logged to stdout.
 
 """
-
-import logging
-
-_log = logging.getLogger('logArgs')
-
 
 def registerCallbacks(reg):
     """Register all necessary or appropriate callbacks for this plugin.
@@ -69,9 +72,10 @@ def registerCallbacks(reg):
     they can also all each have their own set of credentials or anything in
     between.
     """
+    #reg.setEmails('root@domain.com')
     reg.registerCallback('$DEMO_SCRIPT_NAME$', '$DEMO_API_KEY$', logArgs, None)
 
 
-def logArgs(sg, event, args):
+def logArgs(sg, logger, event, args):
     """A callback that logs its arguments."""
-    _log.debug("%s" % str(event))
+    logger.debug("%s" % str(event))
