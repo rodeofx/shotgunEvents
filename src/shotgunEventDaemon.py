@@ -433,11 +433,10 @@ class Engine(object):
                 filePath = os.path.join(path, basename)
                 if filePath in self._modules:
                     newModules[filePath] = self._modules[filePath]
-                    newModules[filePath].load()
                 else:
-                    module = Module(self, filePath)
-                    module.load()
-                    newModules[filePath] = module
+                    newModules[filePath] = Module(self, filePath)
+
+                newModules[filePath].load()
 
         self._modules = newModules
 
