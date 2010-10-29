@@ -185,10 +185,7 @@ Line: %(lineno)d
             will override any default ones.
         @type emails: A I{list}/I{tuple} of email addresses or I{bool}.
         """
-        if namespace:
-            logger = logging.getLogger(namespace)
-        else:
-            logger = logging.getLogger()
+        logger = logging.getLogger(namespace)
 
         # Configure the logger
         if emails is False:
