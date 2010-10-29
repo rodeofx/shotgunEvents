@@ -328,7 +328,7 @@ class Engine(object):
 			self._mainLoop()
 		except KeyboardInterrupt, ex:
 			self._log.warning('Keyboard interrupt. Cleaning up...')
-		except Exception, ex:
+		except:
 			self._log.critical('Crash!!!!! Unexpected error (%s) in main loop.\n\n%s', type(ex), traceback.format_exc(ex))
 		finally:
 			self._removePidFile()
@@ -607,17 +607,17 @@ class Module(object):
 
 		try:
 			module = imp.load_source(moduleName, self._path)
-		except BaseException, ex:
+		except:
 			self._active = False
-			self._logger.error('Could not load the module at %s.\n\n%s', self._path, traceback.format_exc(ex))
+			self._logger.error('Could not load the module at %s.\n\n%s', self._path, traceback.format_exc())
 			return
 
 		regFunc = getattr(module, 'registerCallbacks', None)
 		if isinstance(regFunc, types.FunctionType):
 			try:
 				regFunc(Registrar(self))
-			except BaseException, ex:
-				self.getLogger().critical('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc(ex))
+			except:
+				self.getLogger().critical('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc())
 				self._active = False
 		else:
 			self.getLogger().critical('Did not find a registerCallbacks function in module at %s.', self._path)
@@ -756,7 +756,7 @@ class Callback(object):
 		"""
 		try:
 			self._callback(self._shotgun, self._logger, event, self._args)
-		except BaseException, ex:
+		except:
 			# Get the local variables of the frame of our plugin
 			tb = sys.exc_info()[2]
 			stack = []
@@ -765,7 +765,7 @@ class Callback(object):
 				tb = tb.tb_next
 
 			msg = 'An error occured processing an event.\n\n%s\n\nLocal variables at outer most frame in plugin:\n\n%s'
-			self._logger.critical(msg, traceback.format_exc(ex), pprint.pformat(stack[1].f_locals))
+			self._logger.critical(msg, traceback.format_exc(), pprint.pformat(stack[1].f_locals))
 			self._active = False
 
 	def isActive(self):
