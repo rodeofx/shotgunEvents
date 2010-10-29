@@ -389,9 +389,12 @@ class Engine(object):
                     if module.isActive():
                         for callback in module:
                             if callback.isActive():
+                                msg = 'Dispatching event %d to callback %s in plugin %s.'
+                                self._log.debug(msg, event['id'], str(callback), str(module))
                                 callback.process(event)
                             else:
-                                self._log.debug('Skipping inactive callback %s.', str(callback))
+                                msg = 'Skipping inactive callback %s in plugin.'
+                                self._log.debug(msg, str(callback), str(module))
                     else:
                         self._log.debug('Skipping inactive module %s.', str(module))
                 self._saveEventId(event['id'])
@@ -752,7 +755,6 @@ class Callback(object):
         @type event: I{dict}
         """
         try:
-            self._logger.debug('Processing event %d.', event['id'])
             self._callback(self._shotgun, self._logger, event, self._args)
         except BaseException, ex:
             msg = 'An error occured processing an event.\n\nEvent Data:\n%s\n\n%s'
