@@ -530,18 +530,19 @@ class Module(object):
 
         @raise ValueError: If the path to the plugin is not a valid file.
         """
-        self._moduleName = None
-        self._active = True
         self._engine = engine
-        self._logger = None
-        self._emails = False
         self._path = path
 
         if not os.path.isfile(path):
             raise ValueError('The path to the module is not a valid file - %s.' % path)
 
+        self._moduleName = os.path.splitext(os.path.split(self._path)[1])[0]
+        self._active = True
+        self._emails = True
+        self._logger = self._engine.getPluginLogger(self._moduleName, self._emails)
         self._callbacks = []
         self._mtime = None
+
         self.load()
 
     def isActive(self):
@@ -553,21 +554,35 @@ class Module(object):
         """
         return self._active
 
-    def setEmails(self, emails=False):
-        self._logger = None
-        self._emails = emails
+    def setEmails(self, emails):
+        """
+        Set the email addresses to whom this plugin should send errors.
+
+        @param emails: See L{LogFactory.getLogger}'s emails argument for info.
+        @type emails: A I{list}/I{tuple} of email addresses or I{bool}.
+        """
+        if emails != self._emails:
+            self._emails = emails
+            self._logger = self._engine.getPluginLogger(self._moduleName, self._emails)
 
     def getLogger(self):
-        if self._logger is None:
-            # Use our specified email addresses or the default email addresses.
-            emails = self._emails or True
-            self._logger = self._engine.getPluginLogger(self._moduleName, emails)
+        """
+        Get the logger for this plugin.
+
+        @return: The logger configured for this plugin.
+        @rtype: L{logging.Logger}
+        """
         return self._logger
 
     def load(self):
-        _, basename = os.path.split(self._path)
-        self._moduleName = os.path.splitext(basename)[0]
+        """
+        Load/Reload the plugin and all its callbacks.
 
+        If a plugin has never been loaded it will be loaded normally. If the
+        plugin has been loaded before it will be reloaded only if the file has
+        been modified on disk. In this event callbacks will all be cleared and
+        reloaded.
+        """
         mtime = os.path.getmtime(self._path)
         if self._mtime is None:
             self._load(self._moduleName, mtime, 'Loading module at %s' % self._path)
