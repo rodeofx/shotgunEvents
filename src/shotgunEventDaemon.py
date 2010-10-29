@@ -757,8 +757,15 @@ class Callback(object):
 		try:
 			self._callback(self._shotgun, self._logger, event, self._args)
 		except BaseException, ex:
-			msg = 'An error occured processing an event.\n\nEvent Data:\n%s\n\n%s'
-			self._logger.critical(msg, pprint.pformat(event), traceback.format_exc(ex))
+			# Get the local variables of the frame of our plugin
+			tb = sys.exc_info()[2]
+			stack = []
+			while tb:
+				stack.append(tb.tb_frame)
+				tb = tb.tb_next
+
+			msg = 'An error occured processing an event.\n\n%s\n\nLocal variables at outer most frame in plugin:\n\n%s'
+			self._logger.critical(msg, traceback.format_exc(ex), pprint.pformat(stack[1].f_locals))
 			self._active = False
 
 	def isActive(self):
