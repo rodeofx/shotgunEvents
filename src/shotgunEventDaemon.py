@@ -198,7 +198,7 @@ Line: %(lineno)d
         elif isinstance(emails, (list, tuple)):
             self.addMailHandlerToLogger(logger, emails)
         elif emails is not False:
-            msg = 'Argument emails should be True to use the default addresses or a list of recipient addresses. Got %s.'
+            msg = 'Argument emails should be True to use the default addresses, False to not send any emails or a list of recipient addresses. Got %s.'
             raise ValueError(msg % type(emails))
 
         return logger
