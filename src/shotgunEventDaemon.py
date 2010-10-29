@@ -190,11 +190,11 @@ Line: %(lineno)d
         # Configure the logger
         if emails is False:
             self.removeHandlersFromLogger(logger, logging.handlers.SMTPHandler)
-        if emails is True:
+        elif emails is True:
             self.addMailHandlerToLogger(logger, self._toAddrs)
         elif isinstance(emails, (list, tuple)):
             self.addMailHandlerToLogger(logger, emails)
-        elif emails is not False:
+        else:
             msg = 'Argument emails should be True to use the default addresses, False to not send any emails or a list of recipient addresses. Got %s.'
             raise ValueError(msg % type(emails))
 
