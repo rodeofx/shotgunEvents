@@ -527,6 +527,8 @@ class Module(object):
         @type engine: L{Engine}
         @param path: The path of the plugin file to load.
         @type path: I{str}
+
+        @raise ValueError: If the path to the plugin is not a valid file.
         """
         self._moduleName = None
         self._active = True
@@ -534,6 +536,10 @@ class Module(object):
         self._logger = None
         self._emails = False
         self._path = path
+
+        if not os.path.isfile(path):
+            raise ValueError('The path to the module is not a valid file - %s.' % path)
+
         self._callbacks = []
         self._mtime = None
         self.load()
