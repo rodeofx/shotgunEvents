@@ -627,7 +627,7 @@ class Module(object):
         """
         global sg
         sgConnection = sg.Shotgun(self._engine.getShotgunURL(), sgScriptName, sgScriptKey)
-        logger = self._engine.getPluginLogger(self._moduleName + '.' + callback.__name__, self._emails)
+        logger = self._engine.getPluginLogger(self._moduleName + '.' + callback.__name__, False)
         self._callbacks.append(Callback(callback, sgConnection, logger, args))
 
     def __iter__(self):
