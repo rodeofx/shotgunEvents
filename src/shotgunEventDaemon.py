@@ -392,9 +392,10 @@ class Engine(object):
 					if module.isActive():
 						for callback in module:
 							if callback.isActive():
-								msg = 'Dispatching event %d to callback %s in plugin %s.'
-								self._log.debug(msg, event['id'], str(callback), str(module))
-								callback.process(event)
+								if callback.canProcess(event):
+									msg = 'Dispatching event %d to callback %s in plugin %s.'
+									self._log.debug(msg, event['id'], str(callback), str(module))
+									callback.process(event)
 							else:
 								msg = 'Skipping inactive callback %s in plugin.'
 								self._log.debug(msg, str(callback), str(module))
@@ -626,14 +627,14 @@ class Module(object):
 			self.getLogger().critical('Did not find a registerCallbacks function in module at %s.', self._path)
 			self._active = False
 
-	def registerCallback(self, sgScriptName, sgScriptKey, callback, args=None):
+	def registerCallback(self, sgScriptName, sgScriptKey, callback, matchEvents=None, args=None):
 		"""
 		Register a callback in the module.
 		"""
 		global sg
 		sgConnection = sg.Shotgun(self._engine.getShotgunURL(), sgScriptName, sgScriptKey)
 		logger = self._engine.getPluginLogger(self._moduleName + '.' + callback.__name__, False)
-		self._callbacks.append(Callback(callback, sgConnection, logger, args))
+		self._callbacks.append(Callback(callback, sgConnection, logger, matchEvents, args))
 
 	def __iter__(self):
 		"""
@@ -696,7 +697,7 @@ class Registrar(object):
 		"""
 		self._module.setEmails(emails)
 
-	def registerCallback(self, sgScriptName, sgScriptKey, callback, args=None):
+	def registerCallback(self, sgScriptName, sgScriptKey, callback, args=None, matchEvents=None):
 		"""
 		Register a callback into the engine for this plugin.
 
@@ -715,7 +716,7 @@ class Registrar(object):
 			callback function. Defaults to None.
 		@type args: Any object.
 		"""
-		self._module.registerCallback(sgScriptName, sgScriptKey, callback, args)
+		self._module.registerCallback(sgScriptName, sgScriptKey, callback, matchEvents, args)
 
 
 class Callback(object):
@@ -723,7 +724,7 @@ class Callback(object):
 	A part of a plugin that can be called to process a Shotgun event.
 	"""
 
-	def __init__(self, callback, shotgun, logger, args=None):
+	def __init__(self, callback, shotgun, logger, matchEvents=None, args=None):
 		"""
 		@param callback: The function to run when a Shotgun event occurs.
 		@type callback: A function object.
@@ -744,8 +745,30 @@ class Callback(object):
 		self._shotgun = shotgun
 		self._callback = callback
 		self._logger = logger
+		self._matchEvents = matchEvents
 		self._args = args
 		self._active = True
+
+	def canProcess(self, event):
+		if not self._matchEvents:
+			return True
+
+		if '*' in self._matchEvents:
+			eventType = '*'
+		else:
+			eventType = event['event_type']
+			if eventType not in self._matchEvents:
+				return False
+
+		attributes = self._matchEvents[eventType]
+
+		if attributes is None or '*' in attributes:
+			return True
+
+		if event['attribute_name'] and event['attribute_name'] in attributes:
+			return True
+
+		return False
 
 	def process(self, event):
 		"""
