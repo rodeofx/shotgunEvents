@@ -263,13 +263,12 @@ class Engine(object):
 		@param config: The base configuration options for this L{Engine}.
 		@type config: I{ConfigParser.ConfigParser}
 		"""
-		self._modules = {}
+		self._pluginCollections = [PluginCollection(self, s.strip()) for s in config.get('plugins', 'paths').split(',')]
 		self._logFactory = logFactory
 		self._log = self._logFactory.getLogger('engine', emails=True)
 		self._lastEventId = None
 
 		# Get config values
-		self._paths = [s.strip() for s in config.get('plugins', 'paths').split(',')]
 		self._server = config.get('shotgun', 'server')
 		self._sg = sg.Shotgun(self._server, config.get('shotgun', 'name'), config.get('shotgun', 'key'))
 		self._pidFile = config.get('daemon', 'pidFile')
@@ -386,21 +385,26 @@ class Engine(object):
 		"""
 		self._log.debug('Starting the event processing loop.')
 		while self._checkContinue():
-			self.load()
+			# Reload plugins
+			for collection in self._pluginCollections:
+				collection.load()
+
+			# Process events
 			for event in self._getNewEvents():
-				for module in self._modules.values():
-					if module.isActive():
-						for callback in module:
-							if callback.isActive():
-								if callback.canProcess(event):
-									msg = 'Dispatching event %d to callback %s in plugin %s.'
-									self._log.debug(msg, event['id'], str(callback), str(module))
-									callback.process(event)
-							else:
-								msg = 'Skipping inactive callback %s in plugin.'
-								self._log.debug(msg, str(callback), str(module))
-					else:
-						self._log.debug('Skipping inactive module %s.', str(module))
+				for collection in self._pluginCollections:
+					for plugin in collection:
+						if plugin.isActive():
+							for callback in plugin:
+								if callback.isActive():
+									if callback.canProcess(event):
+										msg = 'Dispatching event %d to callback %s in plugin %s.'
+										self._log.debug(msg, event['id'], str(callback), str(plugin))
+										callback.process(event)
+								else:
+									msg = 'Skipping inactive callback %s in plugin.'
+									self._log.debug(msg, str(callback), str(plugin))
+						else:
+							self._log.debug('Skipping inactive plugin %s.', str(plugin))
 				self._saveEventId(event['id'])
 			time.sleep(1)
 		self._log.debug('Shuting down event processing loop.')
@@ -416,36 +420,6 @@ class Engine(object):
 		"""
 		self._removePidFile()
 		self._log.info('Stopping gracefully once current events have been processed.')
-
-	def load(self):
-		"""
-		Load plugins from disk.
-
-		General behavior:
-		- Loop on all paths.
-		- Find all valid .py plugin files.
-		- Loop on all plugin files.
-		- For any new plugins, load them, otherwise, refresh them.
-		"""
-		newModules = {}
-
-		for path in self._paths:
-			if not os.path.isdir(path):
-				continue
-
-			for basename in os.listdir(path):
-				if not basename.endswith('.py') or basename.startswith('.'):
-					continue
-
-				filePath = os.path.join(path, basename)
-				if filePath in self._modules:
-					newModules[filePath] = self._modules[filePath]
-				else:
-					newModules[filePath] = Module(self, filePath)
-
-				newModules[filePath].load()
-
-		self._modules = newModules
 
 	def _checkContinue(self):
 		"""
@@ -518,11 +492,52 @@ class Engine(object):
 				self._log.error('Error removing pid file.\n\n%s', traceback.format_exc(ex))
 
 
-class Module(object):
+class PluginCollection(object):
 	"""
-	The module class represents a loadable plugin.
+	A group of plugin files in a location on the disk.
+	"""
+	def __init__(self, engine, path):
+		if not os.path.isdir(path):
+			raise ValueError('Invalid path: %s' % path)
 
-	@todo: Rename this class Plugin to make things clearer.
+		self._engine = engine
+		self.path = path
+		self._plugins = {}
+
+	def load(self):
+		"""
+		Load plugins from disk.
+
+		General behavior:
+		- Loop on all paths.
+		- Find all valid .py plugin files.
+		- Loop on all plugin files.
+		- For any new plugins, load them, otherwise, refresh them.
+		"""
+		newPlugins = {}
+
+		for basename in os.listdir(self.path):
+			if not basename.endswith('.py') or basename.startswith('.'):
+				continue
+
+			if basename in self._plugins:
+				newPlugins[basename] = self._plugins[basename]
+			else:
+				newPlugins[basename] = Plugin(self._engine, os.path.join(self.path, basename))
+
+			newPlugins[basename].load()
+
+		self._plugins = newPlugins
+
+	def __iter__(self):
+		for basename in sorted(self._plugins.keys()):
+			yield self._plugins[basename]
+
+
+class Plugin(object):
+	"""
+	The plugin class represents a file on disk which contains one or more
+	callbacks.
 	"""
 	def __init__(self, engine, path):
 		"""
@@ -537,16 +552,14 @@ class Module(object):
 		self._path = path
 
 		if not os.path.isfile(path):
-			raise ValueError('The path to the module is not a valid file - %s.' % path)
+			raise ValueError('The path to the plugin is not a valid file - %s.' % path)
 
-		self._moduleName = os.path.splitext(os.path.split(self._path)[1])[0]
+		self._pluginName = os.path.splitext(os.path.split(self._path)[1])[0]
 		self._active = True
 		self._emails = True
-		self._logger = self._engine.getPluginLogger(self._moduleName, self._emails)
+		self._logger = self._engine.getPluginLogger(self._pluginName, self._emails)
 		self._callbacks = []
 		self._mtime = None
-
-		self.load()
 
 	def isActive(self):
 		"""
@@ -566,7 +579,7 @@ class Module(object):
 		"""
 		if emails != self._emails:
 			self._emails = emails
-			self._logger = self._engine.getPluginLogger(self._moduleName, self._emails)
+			self._logger = self._engine.getPluginLogger(self._pluginName, self._emails)
 
 	def getLogger(self):
 		"""
@@ -588,11 +601,11 @@ class Module(object):
 		"""
 		mtime = os.path.getmtime(self._path)
 		if self._mtime is None:
-			self._load(self._moduleName, mtime, 'Loading module at %s' % self._path)
+			self._load(self._pluginName, mtime, 'Loading plugin at %s' % self._path)
 		elif self._mtime < mtime:
-			self._load(self._moduleName, mtime, 'Reloading module at %s' % self._path)
+			self._load(self._pluginName, mtime, 'Reloading plugin at %s' % self._path)
 
-	def _load(self, moduleName, mtime, message):
+	def _load(self, pluginName, mtime, message):
 		"""
 		Implements the load/reload specifics.
 
@@ -601,7 +614,7 @@ class Module(object):
 		- Try to find a function called registerCallbacks in the file.
 		- Try to run the registration function.
 
-		At every step along the way, if any error occurs the whole module will
+		At every step along the way, if any error occurs the whole plugin will
 		be deactivated and the function will return.
 		"""
 		self.getLogger().info(message)
@@ -610,30 +623,30 @@ class Module(object):
 		self._active = True
 
 		try:
-			module = imp.load_source(moduleName, self._path)
+			plugin = imp.load_source(pluginName, self._path)
 		except:
 			self._active = False
-			self._logger.error('Could not load the module at %s.\n\n%s', self._path, traceback.format_exc())
+			self._logger.error('Could not load the plugin at %s.\n\n%s', self._path, traceback.format_exc())
 			return
 
-		regFunc = getattr(module, 'registerCallbacks', None)
+		regFunc = getattr(plugin, 'registerCallbacks', None)
 		if isinstance(regFunc, types.FunctionType):
 			try:
 				regFunc(Registrar(self))
 			except:
-				self.getLogger().critical('Error running register callback function from module at %s.\n\n%s', self._path, traceback.format_exc())
+				self.getLogger().critical('Error running register callback function from plugin at %s.\n\n%s', self._path, traceback.format_exc())
 				self._active = False
 		else:
-			self.getLogger().critical('Did not find a registerCallbacks function in module at %s.', self._path)
+			self.getLogger().critical('Did not find a registerCallbacks function in plugin at %s.', self._path)
 			self._active = False
 
 	def registerCallback(self, sgScriptName, sgScriptKey, callback, matchEvents=None, args=None):
 		"""
-		Register a callback in the module.
+		Register a callback in the plugin.
 		"""
 		global sg
 		sgConnection = sg.Shotgun(self._engine.getShotgunURL(), sgScriptName, sgScriptKey)
-		logger = self._engine.getPluginLogger(self._moduleName + '.' + callback.__name__, False)
+		logger = self._engine.getPluginLogger(self._pluginName + '.' + callback.__name__, False)
 		self._callbacks.append(Callback(callback, sgConnection, logger, matchEvents, args))
 
 	def __iter__(self):
@@ -649,7 +662,7 @@ class Module(object):
 		@return: The name of the plugin.
 		@rtype: I{str}
 		"""
-		return self._moduleName
+		return self._pluginName
 
 
 class Registrar(object):
@@ -657,12 +670,12 @@ class Registrar(object):
 	Object used to register callbacks into the system by a plugin's registration
 	function.
 	"""
-	def __init__(self, module):
+	def __init__(self, plugin):
 		"""
-		@param module: The module that is being registered.
-		@type module: L{Module}
+		@param plugin: The plugin that is being registered.
+		@type plugin: L{Plugin}
 		"""
-		self._module = module
+		self._plugin = plugin
 
 	def getLogger(self):
 		"""
@@ -671,14 +684,14 @@ class Registrar(object):
 		@return: A properly configured logger object.
 		@rtype: I{logging.Logger}
 		"""
-		return self._module.getLogger()
+		return self._plugin.getLogger()
 
 	logger = property(getLogger)
 
 	def setEmails(self, *emails):
 		"""
 		Set the emails that should receive error and critical notices when
-		something bad happens in this module or any of its callbacks.
+		something bad happens in this plugin or any of its callbacks.
 
 		To send emails to default addresses (default):
 
@@ -695,7 +708,7 @@ class Registrar(object):
 		@param emails: See L{LogFactory.getLogger}'s emails argument for info.
 		@type emails: A I{list}/I{tuple} of email addresses or I{bool}.
 		"""
-		self._module.setEmails(emails)
+		self._plugin.setEmails(emails)
 
 	def registerCallback(self, sgScriptName, sgScriptKey, callback, args=None, matchEvents=None):
 		"""
@@ -716,7 +729,7 @@ class Registrar(object):
 			callback function. Defaults to None.
 		@type args: Any object.
 		"""
-		self._module.registerCallback(sgScriptName, sgScriptKey, callback, matchEvents, args)
+		self._plugin.registerCallback(sgScriptName, sgScriptKey, callback, matchEvents, args)
 
 
 class Callback(object):
