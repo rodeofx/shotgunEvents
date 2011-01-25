@@ -326,10 +326,10 @@ class Engine(daemonizer.Daemon):
 
 		try:
 			self._mainLoop()
-		except KeyboardInterrupt, ex:
+		except KeyboardInterrupt, err:
 			self._log.warning('Keyboard interrupt. Cleaning up...')
-		except Exception, ex:
-			self._log.critical('Crash!!!!! Unexpected error (%s) in main loop.\n\n%s', type(ex), traceback.format_exc(ex))
+		except Exception, err:
+			self._log.critical('Crash!!!!! Unexpected error (%s) in main loop.\n\n%s', type(err), traceback.format_exc(err))
 
 	def _loadLastEventId(self):
 		"""
@@ -348,8 +348,8 @@ class Engine(daemonizer.Daemon):
 					self._saveEventId(int(line))
 					self._log.debug('Read last event id (%d) from file.', self._lastEventId)
 				fh.close()
-			except OSError, ex:
-				self._log.error('Could not load event id from file.\n\n%s', traceback.format_exc(ex))
+			except OSError, err:
+				self._log.error('Could not load event id from file.\n\n%s', traceback.format_exc(err))
 
 		if self._lastEventId is None:
 			order = [{'column':'created_at', 'direction':'desc'}]
@@ -423,11 +423,11 @@ class Engine(daemonizer.Daemon):
 			try:
 				events = self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
 				return events
-			except (sg.ProtocolError, sg.ResponseError), ex:
-				self._log.warning(str(ex))
+			except (sg.ProtocolError, sg.ResponseError), err:
+				self._log.warning(str(err))
 				time.sleep(60)
-			except socket.timeout, ex:
-				self._log.error('Socket timeout. Will retry. %s', str(ex))
+			except socket.timeout, err:
+				self._log.error('Socket timeout. Will retry. %s', str(err))
 
 		return []
 
@@ -444,8 +444,8 @@ class Engine(daemonizer.Daemon):
 				fh = open(self._eventIdFile, 'w')
 				fh.write('%d' % eid)
 				fh.close()
-			except OSError, ex:
-				self._log.error('Can not write event eid to %s.\n\n%s', self._eventIdFile, traceback.format_exc(ex))
+			except OSError, err:
+				self._log.error('Can not write event eid to %s.\n\n%s', self._eventIdFile, traceback.format_exc(err))
 
 
 class PluginCollection(object):
