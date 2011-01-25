@@ -22,9 +22,10 @@ class Daemon(object):
 
 	Usage: subclass the Daemon class and override the _run() method
 	"""
-	def __init__(self, pidfile, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL):
+	def __init__(self, serviceName, pidfile, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL):
 		super(Daemon, self).__init__()
 
+		self._serviceName = serviceName
 		self._stdin = stdin
 		self._stdout = stdout
 		self._stderr = stderr
@@ -70,13 +71,21 @@ class Daemon(object):
 		os.dup2(so.fileno(), sys.stdout.fileno())
 		os.dup2(se.fileno(), sys.stderr.fileno())
 
-		# write pidfile
+		# write pidfile and subsys file
 		pid = str(os.getpid())
 		file(self._pidfile,'w+').write("%s\n" % pid)
+		if os.path.exists('/var/lock/subsys'):
+			fh = open(os.path.join('/var/lock/subsys', self._serviceName), 'w')
+			fh.close()
 
 	def _delpid(self):
 		if os.path.exists(self._pidfile):
 			os.remove(self._pidfile)
+
+		subsysPath = os.path.join('/var/lock/subsys', self._serviceName)
+		if os.path.exists(subsysPath):
+			os.remove(subsysPath)
+
 		self._cleanup()
 
 	def start(self, daemonize=True):
@@ -152,7 +161,14 @@ class Daemon(object):
 
 	def _run(self):
 		"""
-		You should override this method when you subclass Daemon. It will be called after the process has been
-		daemonized by start() or restart().
+		You should override this method when you subclass Daemon. It will be
+		called after the process has been daemonized by start() or restart().
+		"""
+		raise NotImplementedError('You must implement the method in your class.')
+
+	def _cleanup(self):
+		"""
+		You should override this method when you subclass Daemon. It will be
+		called when the daemon exits.
 		"""
 		raise NotImplementedError('You must implement the method in your class.')

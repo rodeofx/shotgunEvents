@@ -1,4 +1,21 @@
 #!/usr/bin/python
+#
+# Init file for Shotgun event daemon
+#
+# chkconfig: 345 99 00
+# description: Shotgun event daemon
+#
+### BEGIN INIT INFO
+# Provides: shotgunEvent
+# Required-Start: $network
+# Should-Start: $remote_fs
+# Required-Stop: $network
+# Should-Stop: $remote_fs
+# Default-Start: 2 3 4 5
+# Short-Description: Shotgun event daemon
+# Description: Shotgun event daemon
+### END INIT INFO
+
 """
 Shotgun Event Framework
 =======================
@@ -273,7 +290,7 @@ class Engine(daemonizer.Daemon):
 		self._sg = sg.Shotgun(self._server, config.get('shotgun', 'name'), config.get('shotgun', 'key'))
 		self._eventIdFile = config.get('daemon', 'eventIdFile')
 
-		super(Engine, self).__init__(config.get('daemon', 'pidFile'))
+		super(Engine, self).__init__('shotgunEvent', config.get('daemon', 'pidFile'))
 
 	def getShotgunURL(self):
 		"""
