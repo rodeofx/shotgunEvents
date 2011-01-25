@@ -250,29 +250,30 @@ Line: %(lineno)d
 			logger.addHandler(mailHandler)
 
 
-class Engine(object):
+class Engine(daemonizer.Daemon):
 	"""
 	The engine holds the main loop of event processing.
 	"""
 
-	def __init__(self, logFactory, config):
+	def __init__(self, configPath):
 		"""
-		@param logFactory: A L{LogFactory} capable of supplying properly
-			configured logger objects.
-		@type logFactory: L{LogFactory}
-		@param config: The base configuration options for this L{Engine}.
-		@type config: I{ConfigParser.ConfigParser}
 		"""
-		self._pluginCollections = [PluginCollection(self, s.strip()) for s in config.get('plugins', 'paths').split(',')]
-		self._logFactory = logFactory
-		self._log = self._logFactory.getLogger('engine', emails=True)
+		self._continue = True
 		self._lastEventId = None
 
+		# Read/parse the config
+		config = ConfigParser.ConfigParser()
+		config.read(configPath)
+
 		# Get config values
+		self._logFactory = self._logFactory = LogFactory(config)
+		self._log = self._logFactory.getLogger('engine', emails=True)
+		self._pluginCollections = [PluginCollection(self, s.strip()) for s in config.get('plugins', 'paths').split(',')]
 		self._server = config.get('shotgun', 'server')
 		self._sg = sg.Shotgun(self._server, config.get('shotgun', 'name'), config.get('shotgun', 'key'))
-		self._pidFile = config.get('daemon', 'pidFile')
 		self._eventIdFile = config.get('daemon', 'eventIdFile')
+
+		super(Engine, self).__init__(config.get('daemon', 'pidFile'))
 
 	def getShotgunURL(self):
 		"""
@@ -299,30 +300,27 @@ class Engine(object):
 		"""
 		return self._logFactory.getLogger('plugin.' + namespace, emails)
 
-	def start(self):
+	def start(self, daemonize=True):
+		if not daemonize:
+			# Setup the stdout logger
+			handler = logging.StreamHandler()
+			handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+			logging.getLogger().addHandler(handler)
+
+		super(Engine, self).start(daemonize)
+
+	def _run(self):
 		"""
 		Start the processing of events.
 
-		If a pidFile (see .conf file) is present, the engine will not start,
-		otherwise one will be created and will store the process id of the
-		engine.
-
-		Once the pid file is taken care of, the last processed id is loaded up
-		from persistent storage on disk.
-
-		Finally the main loop is started.
-
-		If a KeyboardInterrupt or other general Exception is raised. The engine
-		will try to cleanup after itself and remove the pidFile.
+		The last processed id is loaded up from persistent storage on disk and
+		the main loop is started.
 		"""
-		if self._pidFile:
-			if os.path.exists(self._pidFile):
-				self._log.critical('The pid file (%s) allready exists. Is another event sink running?', self._pidFile)
-				return
+		# TODO: Take value from config
+		socket.setdefaulttimeout(60)
 
-			fh = open(self._pidFile, 'w')
-			fh.write("%d\n" % os.getpid())
-			fh.close()
+		# Notify which version of shotgun api we are using
+		self._log.debug('Using Shotgun version %s' % sg.__version__)
 
 		self._loadLastEventId()
 
@@ -332,8 +330,6 @@ class Engine(object):
 			self._log.warning('Keyboard interrupt. Cleaning up...')
 		except Exception, ex:
 			self._log.critical('Crash!!!!! Unexpected error (%s) in main loop.\n\n%s', type(ex), traceback.format_exc(ex))
-		finally:
-			self._removePidFile()
 
 	def _loadLastEventId(self):
 		"""
@@ -384,7 +380,7 @@ class Engine(object):
 		- Each time through the loop, if the pidFile is gone, stop.
 		"""
 		self._log.debug('Starting the event processing loop.')
-		while self._checkContinue():
+		while self._continue:
 			# Reload plugins
 			for collection in self._pluginCollections:
 				collection.load()
@@ -409,35 +405,8 @@ class Engine(object):
 			time.sleep(1)
 		self._log.debug('Shuting down event processing loop.')
 
-	def stop(self):
-		"""
-		Stop the processing of events.
-
-		On each iteration of the main loop, we check if the pidFile exists. If
-		it doesn't, we stop processing events. That's our kill switch. So to
-		stop event processing from this method, we just delete the pidFile from
-		the filesystem.
-		"""
-		self._removePidFile()
-		self._log.info('Stopping gracefully once current events have been processed.')
-
-	def _checkContinue(self):
-		"""
-		Check if this engine should still be processing events.
-
-		As long as the pidFile exists on disk, this engine should keep
-		processing events.
-
-		@return: True if processing should continue, False otherwise.
-		@rtype: I{bool}
-		"""
-		if self._pidFile is None:
-			return True
-
-		if os.path.exists(self._pidFile):
-			return True
-
-		return False
+	def _cleanup(self):
+		self._continue = False
 
 	def _getNewEvents(self):
 		"""
@@ -477,19 +446,6 @@ class Engine(object):
 				fh.close()
 			except OSError, ex:
 				self._log.error('Can not write event eid to %s.\n\n%s', self._eventIdFile, traceback.format_exc(ex))
-
-	def _removePidFile(self):
-		"""
-		Remove the pidFile from the disk.
-
-		This will make the engine stop next time through the main loop if it is
-		still processing events.
-		"""
-		if self._pidFile and os.path.exists(self._pidFile):
-			try:
-				os.unlink(self._pidFile)
-			except OSError, ex:
-				self._log.error('Error removing pid file.\n\n%s', traceback.format_exc(ex))
 
 
 class PluginCollection(object):
@@ -846,37 +802,23 @@ class CustomSMTPHandler(logging.handlers.SMTPHandler):
 
 
 def main():
-	daemonize = True
-	configPath = _getConfigPath()
-	if not os.path.exists(configPath):
-		print 'Config path not found!'
-		return 1
+	if len(sys.argv) == 2:
+		daemon = Engine(_getConfigPath())
 
-	if daemonize:
-		# Double fork to detach process
-		daemonizer.createDaemon()
+		# Find the function to call on the daemon
+		action = sys.argv[1]
+		func = getattr(daemon, action, None)
+
+		# If no function was found, report error.
+		if action[:1] == '_' or func is None:
+			print "Unknown command: %s" % action
+			return 2
+
+		# Call the requested function
+		func()
 	else:
-		# Setup the stdout logger
-		handler = logging.StreamHandler()
-		handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
-		logging.getLogger().addHandler(handler)
-
-	# TODO: Take value from config
-	socket.setdefaulttimeout(60)
-
-	# Read/parse the config
-	config = ConfigParser.ConfigParser()
-	config.read(configPath)
-
-	# Prep logging.
-	logFactory = LogFactory(config)
-
-	# Notify which version of shotgun api we are using
-	logFactory.getLogger().debug('Using Shotgun version %s' % sg.__version__)
-
-	# Start the event processing engine.
-	engine = Engine(logFactory, config)
-	engine.start()
+		print "usage: %s start|stop|restart|foreground" % sys.argv[0]
+		return 2
 
 	return 0
 
@@ -889,7 +831,7 @@ def _getConfigPath():
 	for path in paths:
 		if os.path.exists(path):
 			return path
-	return None
+	raise ValueError('Config path not found!')
 
 
 if __name__ == '__main__':
