@@ -407,15 +407,7 @@ class Engine(daemonizer.Daemon):
 				for collection in self._pluginCollections:
 					for plugin in collection:
 						if plugin.isActive():
-							for callback in plugin:
-								if callback.isActive():
-									if callback.canProcess(event):
-										msg = 'Dispatching event %d to callback %s in plugin %s.'
-										self._log.debug(msg, event['id'], str(callback), str(plugin))
-										callback.process(event)
-								else:
-									msg = 'Skipping inactive callback %s in plugin.'
-									self._log.debug(msg, str(callback), str(plugin))
+							plugin.process(event)
 						else:
 							self._log.debug('Skipping inactive plugin %s.', str(plugin))
 				self._saveEventId(event['id'])
@@ -621,6 +613,23 @@ class Plugin(object):
 		sgConnection = sg.Shotgun(self._engine.getShotgunURL(), sgScriptName, sgScriptKey)
 		logger = self._engine.getPluginLogger(self._pluginName + '.' + callback.__name__, False)
 		self._callbacks.append(Callback(callback, sgConnection, logger, matchEvents, args))
+
+	def process(self, event):
+		for callback in self:
+			if callback.isActive():
+				if callback.canProcess(event):
+					msg = 'Dispatching event %d to callback %s in plugin %s.'
+					self.getLogger().debug(msg, event['id'], str(callback), self._pluginName)
+					callback.process(event)
+
+					if not callback.isActive():
+						self._active = False
+						return False
+			else:
+				msg = 'Skipping inactive callback %s in plugin.'
+				self.getLogger().debug(msg, str(callback), self._pluginName)
+
+		return True
 
 	def __iter__(self):
 		"""
