@@ -563,16 +563,6 @@ class Plugin(object):
 		plugin has been loaded before it will be reloaded only if the file has
 		been modified on disk. In this event callbacks will all be cleared and
 		reloaded.
-		"""
-		mtime = os.path.getmtime(self._path)
-		if self._mtime is None:
-			self._load(self._pluginName, mtime, 'Loading plugin at %s' % self._path)
-		elif self._mtime < mtime:
-			self._load(self._pluginName, mtime, 'Reloading plugin at %s' % self._path)
-
-	def _load(self, pluginName, mtime, message):
-		"""
-		Implements the load/reload specifics.
 
 		General behavior:
 		- Try to load the source of the plugin.
@@ -582,13 +572,23 @@ class Plugin(object):
 		At every step along the way, if any error occurs the whole plugin will
 		be deactivated and the function will return.
 		"""
-		self.getLogger().info(message)
+		# Check file mtime
+		mtime = os.path.getmtime(self._path)
+		if self._mtime is None:
+			self.getLogger().info('Loading plugin at %s' % self._path)
+		elif self._mtime < mtime:
+			self.getLogger().info('Reloading plugin at %s' % self._path)
+		else:
+			# The mtime of file is equal or older. We don't need to do anything.
+			return
+
+		# Reset values
 		self._mtime = mtime
 		self._callbacks = []
 		self._active = True
 
 		try:
-			plugin = imp.load_source(pluginName, self._path)
+			plugin = imp.load_source(self._pluginName, self._path)
 		except:
 			self._active = False
 			self._logger.error('Could not load the plugin at %s.\n\n%s', self._path, traceback.format_exc())
