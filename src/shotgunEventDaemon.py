@@ -143,6 +143,11 @@ import time
 import types
 import traceback
 
+try:
+	import cPickle as pickle
+except ImportError:
+	import pickle
+
 import daemonizer
 import shotgun_api3 as sg
 
@@ -276,7 +281,7 @@ class Engine(daemonizer.Daemon):
 		"""
 		"""
 		self._continue = True
-		self._lastEventId = None
+		self._eventIdData = {}
 
 		# Read/parse the config
 		config = ConfigParser.ConfigParser()
@@ -337,18 +342,21 @@ class Engine(daemonizer.Daemon):
 		socket.setdefaulttimeout(60)
 
 		# Notify which version of shotgun api we are using
-		self._log.debug('Using Shotgun version %s' % sg.__version__)
-
-		self._loadLastEventId()
+		self._log.info('Using Shotgun version %s' % sg.__version__)
 
 		try:
+			for collection in self._pluginCollections:
+				collection.load()
+
+			self._loadEventIdData()
+
 			self._mainLoop()
 		except KeyboardInterrupt, err:
 			self._log.warning('Keyboard interrupt. Cleaning up...')
 		except Exception, err:
 			self._log.critical('Crash!!!!! Unexpected error (%s) in main loop.\n\n%s', type(err), traceback.format_exc(err))
 
-	def _loadLastEventId(self):
+	def _loadEventIdData(self):
 		"""
 		Load the last processed event id from the disk
 
@@ -360,19 +368,26 @@ class Engine(daemonizer.Daemon):
 		if self._eventIdFile and os.path.exists(self._eventIdFile):
 			try:
 				fh = open(self._eventIdFile)
-				line = fh.readline()
-				if line.isdigit():
-					self._saveEventId(int(line))
-					self._log.debug('Read last event id (%d) from file.', self._lastEventId)
+				try:
+					self._eventIdData = pickle.load(fh)
+
+					# Provide event id info to the plugin collections. Once
+					# they've figured out what to do with it, ask them for their
+					# last processed id.
+					for collection in self._pluginCollections:
+						collection.setEventIdData(self._eventIdData.get(collection.path))
+				except pickle.UnpicklingError:
+					fh.close()
+
+					# Reopen the file to try to read an old-style int
+					fh = open(self._eventIdFile)
+					line = fh.readline().strip()
+					if line.isdigit():
+						self._eventIdData = int(line)
+						self._log.debug('Read last event id (%d) from file.', self._eventIdData)
 				fh.close()
 			except OSError, err:
 				self._log.error('Could not load event id from file.\n\n%s', traceback.format_exc(err))
-
-		if self._lastEventId is None:
-			order = [{'column':'created_at', 'direction':'desc'}]
-			result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
-			self._log.info('Read last event id (%d) from the Shotgun database.', result['id'])
-			self._saveEventId(result['id'])
 
 	def _mainLoop(self):
 		"""
@@ -398,20 +413,18 @@ class Engine(daemonizer.Daemon):
 		"""
 		self._log.debug('Starting the event processing loop.')
 		while self._continue:
+			# Process events
+			for event in self._getNewEvents():
+				for collection in self._pluginCollections:
+					collection.process(event)
+				self._saveEventIdData()
+
+			time.sleep(1)
+
 			# Reload plugins
 			for collection in self._pluginCollections:
 				collection.load()
 
-			# Process events
-			for event in self._getNewEvents():
-				for collection in self._pluginCollections:
-					for plugin in collection:
-						if plugin.isActive():
-							plugin.process(event)
-						else:
-							self._log.debug('Skipping inactive plugin %s.', str(plugin))
-				self._saveEventId(event['id'])
-			time.sleep(1)
 		self._log.debug('Shuting down event processing loop.')
 
 	def _cleanup(self):
@@ -424,9 +437,26 @@ class Engine(daemonizer.Daemon):
 		@return: Recent events that need to be processed by the engine.
 		@rtype: I{list} of Shotgun event dictionaries.
 		"""
-		filters = [['id', 'greater_than', self._lastEventId]]
+		if isinstance(self._eventIdData, int):
+			# Backwards compatibility. The _loadEventIdData got an old-style id
+			# file containing a single int
+			lastEventId = self._eventIdData
+			self._eventIdData = {}
+		else:
+			lastEventId = None
+			for newId in [coll.getEventId() for coll in self._pluginCollections]:
+				if newId is not None and (lastEventId is None or newId < self._eventIdData):
+					lastEventId = newId
+
+			if lastEventId is None:
+				order = [{'column':'id', 'direction':'desc'}]
+				result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
+				lastEventId = result['id']
+				self._log.info('Read last event id (%d) from the Shotgun database.', lastEventId)
+
+		filters = [['id', 'greater_than', lastEventId]]
 		fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project']
-		order = [{'column':'created_at', 'direction':'asc'}]
+		order = [{'column':'id', 'direction':'asc'}]
 
 		while True:
 			try:
@@ -440,21 +470,23 @@ class Engine(daemonizer.Daemon):
 
 		return []
 
-	def _saveEventId(self, eid):
+	def _saveEventIdData(self):
 		"""
 		Save an event Id to persistant storage.
 
 		Next time the engine is started it will try to read the event id from
 		this location to know at which event it should start processing.
 		"""
-		self._lastEventId = eid
 		if self._eventIdFile is not None:
+			for collection in self._pluginCollections:
+				self._eventIdData[collection.path] = collection.getEventIdData()
+
 			try:
 				fh = open(self._eventIdFile, 'w')
-				fh.write('%d' % eid)
+				pickle.dump(self._eventIdData, fh)
 				fh.close()
 			except OSError, err:
-				self._log.error('Can not write event eid to %s.\n\n%s', self._eventIdFile, traceback.format_exc(err))
+				self._log.error('Can not write event id data to %s.\n\n%s', self._eventIdFile, traceback.format_exc(err))
 
 
 class PluginCollection(object):
@@ -468,6 +500,40 @@ class PluginCollection(object):
 		self._engine = engine
 		self.path = path
 		self._plugins = {}
+		self._eventIdData = {}
+
+	def setEventIdData(self, eventIdData):
+		if eventIdData is None:
+			self._eventIdData = {}
+			for plugin in self:
+				plugin.setEventId(None)
+		else:
+			self._eventIdData = eventIdData
+			for plugin in self:
+				plugin.setEventId(self._eventIdData.get(plugin.getName()))
+
+	def getEventIdData(self):
+		for plugin in self:
+			self._eventIdData[plugin.getName()] = plugin.getEventId()
+		return self._eventIdData
+
+	def getEventId(self):
+		eId = None
+		for plugin in self:
+			if not plugin.isActive():
+				continue
+
+			newId = plugin.getEventId()
+			if newId is not None and (eId is None or newId < eId):
+				eId = newId
+		return eId
+
+	def process(self, event):
+		for plugin in self:
+			if plugin.isActive():
+				plugin.process(event)
+			else:
+				plugin.getLogger().debug('Skipping: inactive.')
 
 	def load(self):
 		"""
@@ -525,6 +591,16 @@ class Plugin(object):
 		self._logger = self._engine.getPluginLogger(self._pluginName, self._emails)
 		self._callbacks = []
 		self._mtime = None
+		self._eventId = None
+
+	def getName(self):
+		return self._pluginName
+
+	def getEventId(self):
+		return self._eventId
+
+	def setEventId(self, eventId):
+		self._eventId = eventId
 
 	def isActive(self):
 		"""
@@ -615,21 +691,30 @@ class Plugin(object):
 		self._callbacks.append(Callback(callback, sgConnection, logger, matchEvents, args))
 
 	def process(self, event):
+		if self._eventId is not None and event['id'] <= self._eventId:
+			msg = 'Event is too old (%d). Last event processed is (%d).'
+			self.getLogger().debug(msg, event['id'], self._eventId)
+			return self._active
+
 		for callback in self:
 			if callback.isActive():
 				if callback.canProcess(event):
-					msg = 'Dispatching event %d to callback %s in plugin %s.'
-					self.getLogger().debug(msg, event['id'], str(callback), self._pluginName)
-					callback.process(event)
-
-					if not callback.isActive():
+					msg = 'Dispatching event %d to callback %s.'
+					self.getLogger().debug(msg, event['id'], str(callback))
+					if not callback.process(event):
+						# A callback in the plugin failed. Deactivate the whole
+						# plugin.
 						self._active = False
-						return False
+						break
 			else:
 				msg = 'Skipping inactive callback %s in plugin.'
-				self.getLogger().debug(msg, str(callback), self._pluginName)
+				self.getLogger().debug(msg, str(callback))
 
-		return True
+		if self._active:
+			self._eventId = event['id']
+			return True
+
+		return False
 
 	def __iter__(self):
 		"""
@@ -644,7 +729,7 @@ class Plugin(object):
 		@return: The name of the plugin.
 		@rtype: I{str}
 		"""
-		return self._pluginName
+		return self.getName()
 
 
 class Registrar(object):
@@ -788,6 +873,8 @@ class Callback(object):
 			msg = 'An error occured processing an event.\n\n%s\n\nLocal variables at outer most frame in plugin:\n\n%s'
 			self._logger.critical(msg, traceback.format_exc(), pprint.pformat(stack[1].f_locals))
 			self._active = False
+
+		return self._active
 
 	def isActive(self):
 		"""
