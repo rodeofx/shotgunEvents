@@ -132,6 +132,7 @@ Here is some stuff that could be changed or added going forward:
 """
 
 import ConfigParser
+import datetime
 import imp
 import logging
 import logging.handlers
@@ -375,7 +376,9 @@ class Engine(daemonizer.Daemon):
 					# they've figured out what to do with it, ask them for their
 					# last processed id.
 					for collection in self._pluginCollections:
-						collection.setEventIdData(self._eventIdData.get(collection.path))
+						state = self._eventIdData.get(collection.path)
+						if state:
+							collection.setState(state)
 				except pickle.UnpicklingError:
 					fh.close()
 
@@ -440,21 +443,21 @@ class Engine(daemonizer.Daemon):
 		if isinstance(self._eventIdData, int):
 			# Backwards compatibility. The _loadEventIdData got an old-style id
 			# file containing a single int
-			lastEventId = self._eventIdData
+			nextEventId = self._eventIdData
 			self._eventIdData = {}
 		else:
-			lastEventId = None
-			for newId in [coll.getEventId() for coll in self._pluginCollections]:
-				if newId is not None and (lastEventId is None or newId < self._eventIdData):
-					lastEventId = newId
+			nextEventId = None
+			for newId in [coll.getNextUnprocessedEventId() for coll in self._pluginCollections]:
+				if newId is not None and (nextEventId is None or newId < nextEventId):
+					nextEventId = newId
 
-			if lastEventId is None:
+			if nextEventId is None:
 				order = [{'column':'id', 'direction':'desc'}]
 				result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
-				lastEventId = result['id']
-				self._log.info('Read last event id (%d) from the Shotgun database.', lastEventId)
+				nextEventId = result['id'] + 1
+				self._log.info('Next event id (%d) from the Shotgun database.', nextEventId)
 
-		filters = [['id', 'greater_than', lastEventId]]
+		filters = [['id', 'greater_than', nextEventId - 1]]
 		fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project']
 		order = [{'column':'id', 'direction':'asc'}]
 
@@ -479,7 +482,7 @@ class Engine(daemonizer.Daemon):
 		"""
 		if self._eventIdFile is not None:
 			for collection in self._pluginCollections:
-				self._eventIdData[collection.path] = collection.getEventIdData()
+				self._eventIdData[collection.path] = collection.getState()
 
 			try:
 				fh = open(self._eventIdFile, 'w')
@@ -500,30 +503,27 @@ class PluginCollection(object):
 		self._engine = engine
 		self.path = path
 		self._plugins = {}
-		self._eventIdData = {}
+		self._stateData = {}
 
-	def setEventIdData(self, eventIdData):
-		if eventIdData is None:
-			self._eventIdData = {}
-			for plugin in self:
-				plugin.setEventId(None)
-		else:
-			self._eventIdData = eventIdData
-			for plugin in self:
-				plugin.setEventId(self._eventIdData.get(plugin.getName()))
-
-	def getEventIdData(self):
+	def setState(self, state):
+		self._stateData = state
 		for plugin in self:
-			self._eventIdData[plugin.getName()] = plugin.getEventId()
-		return self._eventIdData
+			pluginState = self._stateData.get(plugin.getName())
+			if pluginState:
+				plugin.setState(pluginState)
 
-	def getEventId(self):
+	def getState(self):
+		for plugin in self:
+			self._stateData[plugin.getName()] = plugin.getState()
+		return self._stateData
+
+	def getNextUnprocessedEventId(self):
 		eId = None
 		for plugin in self:
 			if not plugin.isActive():
 				continue
 
-			newId = plugin.getEventId()
+			newId = plugin.getNextUnprocessedEventId()
 			if newId is not None and (eId is None or newId < eId):
 				eId = newId
 		return eId
@@ -591,16 +591,39 @@ class Plugin(object):
 		self._logger = self._engine.getPluginLogger(self._pluginName, self._emails)
 		self._callbacks = []
 		self._mtime = None
-		self._eventId = None
+		self._lastEventId = None
+		self._backlog = {}
 
 	def getName(self):
 		return self._pluginName
 
-	def getEventId(self):
-		return self._eventId
+	def setState(self, state):
+		if isinstance(state, int):
+			self._lastEventId = state
+		elif isinstance(state, types.TupleType):
+			self._lastEventId, self._backlog = state
+		else:
+			raise ValueError('Unknown state type: %s.' % type(state))
 
-	def setEventId(self, eventId):
-		self._eventId = eventId
+	def getState(self):
+		return (self._lastEventId, self._backlog)
+
+	def getNextUnprocessedEventId(self):
+		if self._lastEventId:
+			nextId = self._lastEventId + 1
+		else:
+			nextId = None
+
+		now = datetime.datetime.now()
+		for k in self._backlog.keys():
+			v = self._backlog[k]
+			if v < now:
+				self.getLogger().debug('Timeout elapsed on backlog event id %d.', k)
+				del(self._backlog[k])
+			elif nextId is None or k < nextId:
+				nextId = k
+
+		return nextId
 
 	def isActive(self):
 		"""
@@ -691,11 +714,20 @@ class Plugin(object):
 		self._callbacks.append(Callback(callback, sgConnection, logger, matchEvents, args))
 
 	def process(self, event):
-		if self._eventId is not None and event['id'] <= self._eventId:
-			msg = 'Event is too old (%d). Last event processed is (%d).'
-			self.getLogger().debug(msg, event['id'], self._eventId)
-			return self._active
+		if event['id'] in self._backlog:
+			if self._process(event):
+				del(self._backlog[event['id']])
+				self._updateLastEventId(event['id'])
+		elif self._lastEventId is not None and event['id'] <= self._lastEventId:
+			msg = 'Event %d is too old. Last event processed was (%d).'
+			self.getLogger().debug(msg, event['id'], self._lastEventId)
+		else:
+			if self._process(event):
+				self._updateLastEventId(event['id'])
 
+		return self._active
+
+	def _process(self, event):
 		for callback in self:
 			if callback.isActive():
 				if callback.canProcess(event):
@@ -710,11 +742,15 @@ class Plugin(object):
 				msg = 'Skipping inactive callback %s in plugin.'
 				self.getLogger().debug(msg, str(callback))
 
-		if self._active:
-			self._eventId = event['id']
-			return True
+		return self._active
 
-		return False
+	def _updateLastEventId(self, eventId):
+		if self._lastEventId is not None and eventId > self._lastEventId + 1:
+			expiration = datetime.datetime.now() + datetime.timedelta(minutes=5)
+			for skippedId in range(self._lastEventId + 1, eventId):
+				self.getLogger().debug('Adding event id %d to backlog.', skippedId)
+				self._backlog[skippedId] = expiration
+		self._lastEventId = eventId
 
 	def __iter__(self):
 		"""
