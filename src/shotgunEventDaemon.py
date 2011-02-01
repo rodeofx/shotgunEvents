@@ -441,9 +441,11 @@ class Engine(daemonizer.Daemon):
 		@rtype: I{list} of Shotgun event dictionaries.
 		"""
 		if isinstance(self._eventIdData, int):
-			# Backwards compatibility. The _loadEventIdData got an old-style id
-			# file containing a single int
-			nextEventId = self._eventIdData
+			# Backwards compatibility:
+			# The _loadEventIdData got an old-style id file containing a single
+			# int which is the last id properly processed. Increment by one to
+			# make it the next id we wish to process.
+			nextEventId = self._eventIdData + 1
 			self._eventIdData = {}
 		else:
 			nextEventId = None
@@ -456,6 +458,9 @@ class Engine(daemonizer.Daemon):
 				result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
 				nextEventId = result['id'] + 1
 				self._log.info('Next event id (%d) from the Shotgun database.', nextEventId)
+
+				for collection in self._pluginCollections:
+					collection.setState(nextEventId - 1)
 
 		filters = [['id', 'greater_than', nextEventId - 1]]
 		fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project']
@@ -506,11 +511,16 @@ class PluginCollection(object):
 		self._stateData = {}
 
 	def setState(self, state):
-		self._stateData = state
-		for plugin in self:
-			pluginState = self._stateData.get(plugin.getName())
-			if pluginState:
-				plugin.setState(pluginState)
+		if isinstance(state, int):
+			for plugin in self:
+				plugin.setState(state)
+				self._stateData[plugin.getName()] = plugin.getState()
+		else:
+			self._stateData = state
+			for plugin in self:
+				pluginState = self._stateData.get(plugin.getName())
+				if pluginState:
+					plugin.setState(pluginState)
 
 	def getState(self):
 		for plugin in self:
@@ -618,7 +628,7 @@ class Plugin(object):
 		for k in self._backlog.keys():
 			v = self._backlog[k]
 			if v < now:
-				self.getLogger().debug('Timeout elapsed on backlog event id %d.', k)
+				self.getLogger().warning('Timeout elapsed on backlog event id %d.', k)
 				del(self._backlog[k])
 			elif nextId is None or k < nextId:
 				nextId = k
