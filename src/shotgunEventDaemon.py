@@ -780,68 +780,22 @@ class Plugin(object):
 
 class Registrar(object):
 	"""
-	Object used to register callbacks into the system by a plugin's registration
-	function.
+	See public API docs in docs folder.
 	"""
 	def __init__(self, plugin):
 		"""
-		@param plugin: The plugin that is being registered.
-		@type plugin: L{Plugin}
+		Wrap a plugin so it can be passed to a user.
 		"""
 		self._plugin = plugin
 
 	def getLogger(self):
-		"""
-		Get the logger used to log messages from within the plugin.
-
-		@return: A properly configured logger object.
-		@rtype: I{logging.Logger}
-		"""
 		return self._plugin.getLogger()
-
 	logger = property(getLogger)
 
 	def setEmails(self, *emails):
-		"""
-		Set the emails that should receive error and critical notices when
-		something bad happens in this plugin or any of its callbacks.
-
-		To send emails to default addresses (default):
-
-		>>> reg.setEmails(True)
-
-		To disable emails (this is not suggested as you won't get error messages):
-
-		>>> reg.setEmails(False)
-
-		To send emails to specific addresses use:
-
-		>>> reg.setEmails('user1@domain.com', 'user2@domain.com')
-
-		@param emails: See L{LogFactory.getLogger}'s emails argument for info.
-		@type emails: A I{list}/I{tuple} of email addresses or I{bool}.
-		"""
 		self._plugin.setEmails(emails)
 
 	def registerCallback(self, sgScriptName, sgScriptKey, callback, args=None, matchEvents=None):
-		"""
-		Register a callback into the engine for this plugin.
-
-		@note: The args argument will be stored and returned to you when the
-			callback is run. This is to allow you the possibility of gathering
-			data in the registration part of the process and have access to said
-			data when the callback is run.
-
-		@param sgScriptName: A script name as configured in Shotgun.
-		@type sgScriptName: I{str}
-		@param sgScriptKey: A script key as configured in Shotgun.
-		@type sgScriptKey: I{str}
-		@param callback: The function to run when a Shotgun event occurs.
-		@type callback: A function object.
-		@param args: Any datastructure you would like to be passed to your
-			callback function. Defaults to None.
-		@type args: Any object.
-		"""
 		self._plugin.registerCallback(sgScriptName, sgScriptKey, callback, matchEvents, args)
 
 
