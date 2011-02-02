@@ -456,7 +456,7 @@ class Engine(daemonizer.Daemon):
 				if newId is not None and (nextEventId is None or newId < nextEventId):
 					nextEventId = newId
 
-			if nextEventId is None:
+			while nextEventId is None:
 				order = [{'column':'id', 'direction':'desc'}]
 				try:
 					result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
