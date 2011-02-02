@@ -295,6 +295,9 @@ class Engine(daemonizer.Daemon):
 		self._server = config.get('shotgun', 'server')
 		self._sg = sg.Shotgun(self._server, config.get('shotgun', 'name'), config.get('shotgun', 'key'))
 		self._eventIdFile = config.get('daemon', 'eventIdFile')
+		self._max_conn_retries = config.getint('daemon', 'max_conn_retries')
+		self._conn_retry_sleep = config.getint('daemon', 'conn_retry_sleep')
+		self._poll_interval = config.getint('daemon', 'poll_interval')
 
 		super(Engine, self).__init__('shotgunEvent', config.get('daemon', 'pidFile'))
 
@@ -405,7 +408,7 @@ class Engine(daemonizer.Daemon):
 		- Send the callback an event
 		- Once all callbacks are done in all plugins, save the eventId
 		- Go to the next event
-		- Once all events are processed, wait one second and start over.
+		- Once all events are processed, wait for the defined polling interval time and start over.
 
 		Caveats:
 		- If a plugin is deemed "inactive" (an error occured during
@@ -422,7 +425,7 @@ class Engine(daemonizer.Daemon):
 					collection.process(event)
 				self._saveEventIdData()
 
-			time.sleep(1)
+			time.sleep(self._poll_interval)
 
 			# Reload plugins
 			for collection in self._pluginCollections:
@@ -455,27 +458,33 @@ class Engine(daemonizer.Daemon):
 
 			if nextEventId is None:
 				order = [{'column':'id', 'direction':'desc'}]
-				result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
-				nextEventId = result['id'] + 1
-				self._log.info('Next event id (%d) from the Shotgun database.', nextEventId)
+				try:
+					result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
+				except (sg.ProtocolError, sg.ResponseError), err:
+					self._log.warning(str(err))
+					time.sleep(self._conn_retry_sleep)
+				else:
+					nextEventId = result['id'] + 1
+					self._log.info('Next event id (%d) from the Shotgun database.', nextEventId)
 
-				for collection in self._pluginCollections:
-					collection.setState(nextEventId - 1)
+					for collection in self._pluginCollections:
+						collection.setState(nextEventId - 1)
 
 		filters = [['id', 'greater_than', nextEventId - 1]]
 		fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project']
 		order = [{'column':'id', 'direction':'asc'}]
 
+		conn_attempts = 0
 		while True:
 			try:
 				events = self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
+				conn_attempts = 0
 				return events
-			except (sg.ProtocolError, sg.ResponseError), err:
-				self._log.warning(str(err))
-				time.sleep(60)
-			except socket.timeout, err:
-				self._log.error('Socket timeout. Will retry. %s', str(err))
-
+			except (sg.ProtocolError, sg.ResponseError, socket.error), err:
+				conn_attempts = self._checkConnectionAttempts(conn_attempts, str(err))
+			except Exception, err:
+				msg = "Unknown error: %s" % str(err)
+				conn_attempts = self._checkConnectionAttempts(conn_attempts, msg)
 		return []
 
 	def _saveEventIdData(self):
@@ -495,6 +504,14 @@ class Engine(daemonizer.Daemon):
 				fh.close()
 			except OSError, err:
 				self._log.error('Can not write event id data to %s.\n\n%s', self._eventIdFile, traceback.format_exc(err))
+
+	def _checkConnectionAttempts(self, conn_attempts, msg):
+		conn_attempts += 1
+		if conn_attempts == self._max_conn_retries:
+			conn_attempts = 0
+			self._log.error('Unable to connect to Shotgun (attempt %s of %s): %s', conn_attempts, self._max_conn_retries, msg)
+			time.sleep(self._conn_retry_sleep)
+		return conn_attempts
 
 
 class PluginCollection(object):
