@@ -11,7 +11,7 @@ def registerCallbacks(reg):
         'Shotgun_Task_Change': ['sg_status_list'],
     }
     
-    reg.registerCallback('$DEMO_SCRIPT_NAME$', '$DEMO_API_KEY$', flipDownstreamTasks, event_types, matchEvents, None)
+    reg.registerCallback('$DEMO_SCRIPT_NAME$', '$DEMO_API_KEY$', flipDownstreamTasks, matchEvents, None)
 
 
 def flipDownstreamTasks(sg, logger, event, args):
