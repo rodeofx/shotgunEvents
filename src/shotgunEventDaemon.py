@@ -443,6 +443,7 @@ class Engine(daemonizer.Daemon):
         @return: Recent events that need to be processed by the engine.
         @rtype: I{list} of Shotgun event dictionaries.
         """
+        conn_attempts = 0
         if isinstance(self._eventIdData, int):
             # Backwards compatibility:
             # The _loadEventIdData got an old-style id file containing a single
@@ -460,10 +461,13 @@ class Engine(daemonizer.Daemon):
                 order = [{'column':'id', 'direction':'desc'}]
                 try:
                     result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
-                except (sg.ProtocolError, sg.ResponseError), err:
-                    self._log.warning(str(err))
-                    time.sleep(self._conn_retry_sleep)
+                except (sg.ProtocolError, sg.ResponseError, socket.err), err:
+                    conn_attempts = self._checkConnectionAttempts(conn_attempts, str(err))
+                except Exception, err:
+                    msg = "Unknown error: %s" % str(err)
+                    conn_attempts = self._checkConnectionAttempts(conn_attempts, msg)
                 else:
+                    conn_attempts = 0
                     nextEventId = result['id'] + 1
                     self._log.info('Next event id (%d) from the Shotgun database.', nextEventId)
                     
@@ -508,9 +512,11 @@ class Engine(daemonizer.Daemon):
     def _checkConnectionAttempts(self, conn_attempts, msg):
         conn_attempts += 1
         if conn_attempts == self._max_conn_retries:
-            conn_attempts = 0
             self._log.error('Unable to connect to Shotgun (attempt %s of %s): %s', conn_attempts, self._max_conn_retries, msg)
+            conn_attempts = 0
             time.sleep(self._conn_retry_sleep)
+        else:
+            self._log.warning('Unable to connect to Shotgun (attempt %s of %s): %s', conn_attempts, self._max_conn_retries, msg)
         return conn_attempts
 
 
