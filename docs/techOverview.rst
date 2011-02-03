@@ -16,7 +16,7 @@ Each plugin within a plugin path is then processed in ascending alphabetical ord
 
 .. note::
 
-	Internally the filenames are put in a list and sorted.
+    Internally the filenames are put in a list and sorted.
 
 Finally, each callback registered by a plugin is called in registration order.
 First resgistered, first run.
@@ -35,8 +35,8 @@ registrations.
 
 Here is an example of a *registerCallbacks* function::
 
-	def registerCallbacks(reg):
-	    reg.registerCallback('name', 'apiKey', doEvent)
+    def registerCallbacks(reg):
+        reg.registerCallback('name', 'apiKey', doEvent)
 
 The registerCallback method of the Registrar object requires three arguments:
 
@@ -60,8 +60,8 @@ A callback requires four arguments:
 
 Here is an example of a functional callback::
 
-	def doEvent(sg, logger, event, args):
-	    logger.info('In event %s...', str(event))
+    def doEvent(sg, logger, event, args):
+        logger.info('In event %s...', str(event))
 
 
 Logging information
@@ -73,11 +73,11 @@ configured appropriately for you.
 
 To log from the registerCallbacks function do as follows::
 
-	def registerCallbacks(reg):
-	    reg.logger.info('info')
-	    reg.logger.error('error') # levels error and higher will be sent via email.
+    def registerCallbacks(reg):
+        reg.logger.info('info')
+        reg.logger.error('error') # levels error and higher will be sent via email.
 
 To log from a callback function::
 
-	def myRegisteredCallback(sg, logger, event, args):
-	    logger.info('In callback...')
+    def myRegisteredCallback(sg, logger, event, args):
+        logger.info('In callback...')
