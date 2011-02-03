@@ -298,6 +298,7 @@ class Engine(daemonizer.Daemon):
         self._max_conn_retries = config.getint('daemon', 'max_conn_retries')
         self._conn_retry_sleep = config.getint('daemon', 'conn_retry_sleep')
         self._poll_interval = config.getint('daemon', 'poll_interval')
+        self._use_session_uuid = config.getboolean('shotgun', 'use_session_uuid')
         
         super(Engine, self).__init__('shotgunEvent', config.get('daemon', 'pidFile'))
     
@@ -475,10 +476,9 @@ class Engine(daemonizer.Daemon):
                         collection.setState(nextEventId - 1)
         
         filters = [['id', 'greater_than', nextEventId - 1]]
-        fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project']
+        fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project', 'session_uuid']
         order = [{'column':'id', 'direction':'asc'}]
         
-        conn_attempts = 0
         while True:
             try:
                 events = self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
@@ -883,6 +883,8 @@ class Callback(object):
         @param event: The Shotgun event to process.
         @type event: I{dict}
         """
+        # set session_uuid for UI updates
+        self._shotgun.set_session_uuid(event['session_uuid'])
         try:
             self._callback(self._shotgun, self._logger, event, self._args)
         except:
