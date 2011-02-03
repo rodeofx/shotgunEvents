@@ -1,6 +1,12 @@
 Welcome to Shotgun Event Daemon's documentation!
 =================================================
 
+This software was originaly developed by `Patrick Boucher
+<http://www.patrickboucher.com>`_ with support from `Rodeo Fx
+<http://rodeofx.com>`_ and `Oblique <http://obliquefx.com>`_, it is now part of
+`Shotgun Software <http://www.shotgunsoftware.com>`_'s `open source initiative
+<https://github.com/shotgunsoftware>`_.
+
 This software is provided under the MIT License that can be found in the LICENSE
 file or here: http://www.opensource.org/licenses/mit-license.php
 
