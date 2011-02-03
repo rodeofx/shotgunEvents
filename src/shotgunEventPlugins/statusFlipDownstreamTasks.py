@@ -1,33 +1,12 @@
 """
-EXAMPLE:
-
 When a Task status is flipped to 'fin' (Final), lookup each downstream Task that is currently
 'wtg' (Waiting To Start) and see if all upstream Tasks are now 'fin'. If so, flip the downstream Task
 to 'rdy' (Ready To Start)
 
-You can modify the status values in the logic to match your workflow
+You can modify the status values in the logic to match your workflow.
 """
 
 def registerCallbacks(reg):
-    """
-    matchEvents is a dictionary where the key is the event_type (string) to match and the value is a list
-    of attribute_names to match. In the example below, we will run this callback if the event_type is
-    a 'Shotgun_Task_Change' and the attribute_name is 'sg_status_list' (ie. the status was changed on a
-    Task).
-    
-    You can also use '*' to match all values both in the key and in the value list. For example:
-    # match all Shotgun_Task_Change events regardless of what attribute was modified.
-    matchEvents = {
-        'Shotgun_Task_Change': ['*'],
-    }
-    or
-    # match all events regardless of what event_type was generated (this processes every event... that's
-    # a lot of them and probably not required unless you're doing something more advanced).
-    matchEvents = {
-        '*': [],
-    }
-    
-    """
     matchEvents = {
         'Shotgun_Task_Change': ['sg_status_list'],
     }
@@ -38,6 +17,10 @@ def registerCallbacks(reg):
 def flipDownstreamTasks(sg, logger, event, args):
     """Flip downstream Tasks to 'rdy' if all of their upstream Tasks are 'fin'"""
     
+    # we only care about Tasks that have been finalled
+    if 'new_value' not in event['meta'] or event['meta']['new_value'] != 'fin':
+        return
+    
     # downtream tasks that are currently wtg
     ds_filters = [
         ['upstream_tasks', 'is', event['entity']],
@@ -47,7 +30,6 @@ def flipDownstreamTasks(sg, logger, event, args):
     
     for ds_task in sg.find("Task", ds_filters, fields):
         change_status = True
-        
         # don't change status unless *all* upstream tasks are fin
         if len(ds_task["upstream_tasks"]) > 1:
             logger.debug("Task #%d has multiple upstream Tasks", event['entity']['id'])
