@@ -635,8 +635,7 @@ class Plugin(object):
         """
         global sg
         sgConnection = sg.Shotgun(self._engine.getShotgunURL(), sgScriptName, sgScriptKey)
-        logger = self._engine.getPluginLogger(self._pluginName + '.' + callback.__name__, False)
-        self._callbacks.append(Callback(callback, self._engine, sgConnection, logger, matchEvents, args))
+        self._callbacks.append(Callback(callback, self, self._engine, sgConnection, matchEvents, args))
 
     def process(self, event):
         if event['id'] in self._backlog:
@@ -719,7 +718,7 @@ class Callback(object):
     A part of a plugin that can be called to process a Shotgun event.
     """
 
-    def __init__(self, callback, engine, shotgun, logger, matchEvents=None, args=None):
+    def __init__(self, callback, plugin, engine, shotgun, matchEvents=None, args=None):
         """
         @param callback: The function to run when a Shotgun event occurs.
         @type callback: A function object.
@@ -741,13 +740,24 @@ class Callback(object):
         if not callable(callback):
             raise TypeError('The callback must be a callable object (function, method or callable class instance).')
 
+        self._name = None
         self._shotgun = shotgun
         self._callback = callback
         self._engine = engine
-        self._logger = logger
+        self._logger = None
         self._matchEvents = matchEvents
         self._args = args
         self._active = True
+
+        # Find a name for this object
+        if hasattr(callback, '__name__'):
+            self._name = callback.__name__
+        elif hasattr(callback, '__class__') and hasattr(callback, '__call__'):
+            self._name = '%s_%s' % (callback.__class__.__name__, hex(id(callback)))
+        else:
+            raise ValueError('registerCallback should be called with a function or a callable object instance as callback argument.')
+
+        self._logger = self._engine.getPluginLogger(plugin.getName() + '.' + self._name, False)
 
     def canProcess(self, event):
         if not self._matchEvents:
@@ -817,7 +827,7 @@ class Callback(object):
         @return: The name of the callback
         @rtype: I{str}
         """
-        return self._callback.__name__
+        return self._name
 
 
 class CustomSMTPHandler(logging.handlers.SMTPHandler):
