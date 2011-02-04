@@ -12,10 +12,10 @@ file or here: http://www.opensource.org/licenses/mit-license.php
 
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 3
 
-   Technical Overview <techOverview>
-   Plugin API <api>
+   Plugins <api>
+   Technical Details <techOverview>
 
 
 Overview
@@ -70,7 +70,7 @@ Known Issues
   and might not be completely bug free.
 
 If you would like to submit issues please go to the `GitHub issues page
-<https://github.com/pboucher/shotgunEvents/issues>`_.
+<http://github.com/shotgunsoftware/shotgunEvents/issues>`_.
 
 
 Going forward
@@ -90,5 +90,4 @@ Indices and tables
 ==================
 
 * :ref:`genindex`
-* :ref:`modindex`
 * :ref:`search`
