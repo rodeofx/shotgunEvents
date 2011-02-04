@@ -134,7 +134,7 @@ The object passed to the :func:`registerCallbacks` function.
 
             reg.setEmails('user1@domain.com', 'user2@domain.com')
 
-    .. method:: registerCallback(sgScriptName, sgScriptKey, callback, args=None, matchEvents=None)
+    .. method:: registerCallback(sgScriptName, sgScriptKey, callback, matchEvents=None, args=None)
 
         Register a callback into the engine for this plugin.
 
@@ -142,8 +142,8 @@ The object passed to the :func:`registerCallbacks` function.
         :param str sgScriptKey: The application key for the script taken from a Shotgun script page.
         :param callback: A callable function that. See :func:`exampleCallback`.
         :type callback: A function or an object with a __call__ method.
-        :param args: Any object you want the framework to pass back into your callback.
         :param dict matchEvents: A filter of events you want to have passed to your callback.
+        :param args: Any object you want the framework to pass back into your callback.
 
         The *sgScriptName* is used to identify the plugin to Shotgun. Any name
         can be shared across any number of callbacks or be unique for a single
@@ -156,19 +156,6 @@ The object passed to the :func:`registerCallbacks` function.
         matches your filter needs processing. Although any callable should be
         able to run, using a class here is not suggested. Use of a function or
         an instance with a *__call__* method is more appropriate.
-
-        The *args* argument will not be used by the event framework itself but
-        will simply be passed back to your callback without any modification.
-
-        .. note::
-            The point of the *args* argument is for you to be able to process
-            time consuming stuff in the :func:`registerCallbacks` function and
-            have it passed back to you at event processing time.
-
-        .. note::
-            Another use of the *args* argument could be to pass in a common
-            mutable, say a `dict`, to multiple callbacks to have them share
-            data.
 
         The *matchEvent* argument is a filter that allows you to specify which
         events the callback being registered is interrested in. If *matchEvents*
@@ -205,6 +192,19 @@ The object passed to the :func:`registerCallbacks` function.
             matchEvents = {
                 '*': ['*']
             }
+
+        The *args* argument will not be used by the event framework itself but
+        will simply be passed back to your callback without any modification.
+
+        .. note::
+            The point of the *args* argument is for you to be able to process
+            time consuming stuff in the :func:`registerCallbacks` function and
+            have it passed back to you at event processing time.
+
+        .. note::
+            Another use of the *args* argument could be to pass in a common
+            mutable, say a `dict`, to multiple callbacks to have them share
+            data.
 
 
 Callback

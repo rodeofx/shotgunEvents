@@ -29,7 +29,7 @@ def registerCallbacks(reg):
     #
     #eventFilter = {'Shotgun_Task_Change': ['sg_status_list']}
     eventFilter = None
-    reg.registerCallback('$DEMO_SCRIPT_NAME$', '$DEMO_API_KEY$', logArgs, None, eventFilter)
+    reg.registerCallback('$DEMO_SCRIPT_NAME$', '$DEMO_API_KEY$', logArgs, eventFilter, None)
 
 
 def logArgs(sg, logger, event, args):
