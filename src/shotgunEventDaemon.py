@@ -294,7 +294,7 @@ class Engine(daemonizer.Daemon):
                             collection.setState(lastEventId)
                 fh.close()
             except OSError, err:
-                self._log.error('Could not load event id from file.\n\n%s', traceback.format_exc(err))
+                raise EventDaemonError('Could not load event id from file.\n\n%s' % traceback.format_exc(err))
         else:
             # No id file?
             # Get the event data from the database.
