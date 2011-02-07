@@ -281,15 +281,42 @@ class Engine(daemonizer.Daemon):
                 except pickle.UnpicklingError:
                     fh.close()
 
+                    # Backwards compatibility:
                     # Reopen the file to try to read an old-style int
                     fh = open(self._eventIdFile)
                     line = fh.readline().strip()
                     if line.isdigit():
-                        self._eventIdData = int(line)
-                        self._log.debug('Read last event id (%d) from file.', self._eventIdData)
+                        # The _loadEventIdData got an old-style id file containing a single
+                        # int which is the last id properly processed.
+                        lastEventId = int(line)
+                        self._log.debug('Read last event id (%d) from file.', lastEventId)
+                        for collection in self._pluginCollections:
+                            collection.setState(lastEventId)
                 fh.close()
             except OSError, err:
                 self._log.error('Could not load event id from file.\n\n%s', traceback.format_exc(err))
+        else:
+            # No id file?
+            # Get the event data from the database.
+            conn_attempts = 0
+            lastEventId = None
+            while lastEventId is None:
+                order = [{'column':'id', 'direction':'desc'}]
+                try:
+                    result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
+                except (sg.ProtocolError, sg.ResponseError, socket.err), err:
+                    conn_attempts = self._checkConnectionAttempts(conn_attempts, str(err))
+                except Exception, err:
+                    msg = "Unknown error: %s" % str(err)
+                    conn_attempts = self._checkConnectionAttempts(conn_attempts, msg)
+                else:
+                    lastEventId = result['id']
+                    self._log.info('Last event id (%d) from the Shotgun database.', lastEventId)
+
+                    for collection in self._pluginCollections:
+                        collection.setState(lastEventId)
+
+            self._saveEventIdData()
 
     def _mainLoop(self):
         """
@@ -339,51 +366,28 @@ class Engine(daemonizer.Daemon):
         @return: Recent events that need to be processed by the engine.
         @rtype: I{list} of Shotgun event dictionaries.
         """
-        conn_attempts = 0
-        if isinstance(self._eventIdData, int):
-            # Backwards compatibility:
-            # The _loadEventIdData got an old-style id file containing a single
-            # int which is the last id properly processed. Increment by one to
-            # make it the next id we wish to process.
-            nextEventId = self._eventIdData + 1
-            self._eventIdData = {}
-        else:
-            nextEventId = None
-            for newId in [coll.getNextUnprocessedEventId() for coll in self._pluginCollections]:
-                if newId is not None and (nextEventId is None or newId < nextEventId):
-                    nextEventId = newId
+        nextEventId = None
+        for newId in [coll.getNextUnprocessedEventId() for coll in self._pluginCollections]:
+            if newId is not None and (nextEventId is None or newId < nextEventId):
+                nextEventId = newId
 
-            while nextEventId is None:
-                order = [{'column':'id', 'direction':'desc'}]
-                try:
-                    result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
-                except (sg.ProtocolError, sg.ResponseError, socket.err), err:
-                    conn_attempts = self._checkConnectionAttempts(conn_attempts, str(err))
-                except Exception, err:
-                    msg = "Unknown error: %s" % str(err)
-                    conn_attempts = self._checkConnectionAttempts(conn_attempts, msg)
-                else:
-                    conn_attempts = 0
-                    nextEventId = result['id'] + 1
-                    self._log.info('Next event id (%d) from the Shotgun database.', nextEventId)
-
-                    for collection in self._pluginCollections:
-                        collection.setState(nextEventId - 1)
+        if nextEventId is None:
+            raise EventDaemonError('Could not find a reference event id to start processing from.')
 
         filters = [['id', 'greater_than', nextEventId - 1]]
         fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project', 'session_uuid']
         order = [{'column':'id', 'direction':'asc'}]
 
+        conn_attempts = 0
         while True:
             try:
-                events = self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
-                conn_attempts = 0
-                return events
+                return self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
             except (sg.ProtocolError, sg.ResponseError, socket.error), err:
                 conn_attempts = self._checkConnectionAttempts(conn_attempts, str(err))
             except Exception, err:
                 msg = "Unknown error: %s" % str(err)
                 conn_attempts = self._checkConnectionAttempts(conn_attempts, msg)
+
         return []
 
     def _saveEventIdData(self):
