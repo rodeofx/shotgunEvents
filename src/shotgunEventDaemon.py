@@ -566,7 +566,7 @@ class Plugin(object):
         """
         return self._active
 
-    def setEmails(self, emails):
+    def setEmails(self, *emails):
         """
         Set the email addresses to whom this plugin should send errors.
 
@@ -585,6 +585,7 @@ class Plugin(object):
         @rtype: L{logging.Logger}
         """
         return self._logger
+    logger = property(getLogger)
 
     def load(self):
         """
@@ -708,16 +709,12 @@ class Registrar(object):
         Wrap a plugin so it can be passed to a user.
         """
         self._plugin = plugin
+        self._allowed = ['logger', 'getLogger', 'setEmails', 'registerCallback']
 
-    def getLogger(self):
-        return self._plugin.getLogger()
-    logger = property(getLogger)
-
-    def setEmails(self, *emails):
-        self._plugin.setEmails(emails)
-
-    def registerCallback(self, sgScriptName, sgScriptKey, callback, matchEvents=None, args=None):
-        self._plugin.registerCallback(sgScriptName, sgScriptKey, callback, matchEvents, args)
+    def __getattr__(self, name):
+        if name in self._allowed:
+            return getattr(self._plugin, name)
+        raise AttributeError("type object '%s' has no attribute '%s'" % (type(self).__name__, name))
 
 
 class Callback(object):
