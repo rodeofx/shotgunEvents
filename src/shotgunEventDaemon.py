@@ -23,6 +23,9 @@ folder or an html compiled version at:
 http://shotgunsoftware.github.com/shotgunEvents
 """
 
+__version__ = '0.9'
+__version_info__ = (0, 9)
+
 import ConfigParser
 import datetime
 import imp
