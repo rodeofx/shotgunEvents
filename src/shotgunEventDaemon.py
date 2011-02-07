@@ -855,6 +855,10 @@ class CustomSMTPHandler(logging.handlers.SMTPHandler):
         return subject
 
 
+class EventDaemonError(Exception):
+    pass
+
+
 def main():
     if len(sys.argv) == 2:
         daemon = Engine(_getConfigPath())
@@ -885,7 +889,7 @@ def _getConfigPath():
     for path in paths:
         if os.path.exists(path):
             return path
-    raise ValueError('Config path not found!')
+    raise EventDaemonError('Config path not found!')
 
 
 if __name__ == '__main__':
