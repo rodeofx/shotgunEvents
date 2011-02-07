@@ -189,14 +189,14 @@ class Engine(daemonizer.Daemon):
         self._eventIdFile = config.get('daemon', 'eventIdFile')
         self._max_conn_retries = config.getint('daemon', 'max_conn_retries')
         self._conn_retry_sleep = config.getint('daemon', 'conn_retry_sleep')
-        self._poll_interval = config.getint('daemon', 'poll_interval')
+        self._fetch_interval = config.getint('daemon', 'fetch_interval')
         self._use_session_uuid = config.getboolean('shotgun', 'use_session_uuid')
 
         super(Engine, self).__init__('shotgunEvent', config.get('daemon', 'pidFile'))
 
     def getShotgunURL(self):
         """
-        Get the URL of the Shotgun instance this engine will be polling.
+        Get the URL of the Shotgun instance this engine will be monitoring.
 
         @return: A url to a Shotgun instance.
         @rtype: I{str}
@@ -301,7 +301,7 @@ class Engine(daemonizer.Daemon):
         - Send the callback an event
         - Once all callbacks are done in all plugins, save the eventId
         - Go to the next event
-        - Once all events are processed, wait for the defined polling interval time and start over.
+        - Once all events are processed, wait for the defined fetch interval time and start over.
 
         Caveats:
         - If a plugin is deemed "inactive" (an error occured during
@@ -318,7 +318,7 @@ class Engine(daemonizer.Daemon):
                     collection.process(event)
                 self._saveEventIdData()
 
-            time.sleep(self._poll_interval)
+            time.sleep(self._fetch_interval)
 
             # Reload plugins
             for collection in self._pluginCollections:

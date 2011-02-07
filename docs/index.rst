@@ -22,15 +22,15 @@ Overview
 --------
 
 When you want to access the Shotgun event stream, the preferred way to do so it
-to poll the events table, get any new events, process them and repeat.
+to monitor the events table, get any new events, process them and repeat.
 
 A lot of stuff is required for this process to work successfully, stuff that may
 not have any direct bearing on the business rules that need to be applied.
 
-The role of the framework is to keep any tedious event polling related tasks out
-of the hands of the business logic implementor.
+The role of the framework is to keep any tedious monitoring tasks out of the
+hands of the business logic implementor.
 
-The framework is a daemon process that runs on a server and polls the Shotgun
+The framework is a daemon process that runs on a server and monitors the Shotgun
 event stream. When events are found, the daemon hands the events out to a series
 of registered plugins. Each plugin can process the event as it wishes.
 
@@ -39,7 +39,7 @@ The daemon handles:
 - Registering plugins from one or more specified paths.
 - Deactivate any crashing plugins.
 - Reloading plugins when they change on disk.
-- Polling the Shotgun event stream.
+- Monitoring the Shotgun event stream.
 - Remembering the last processed event id and any backlog.
 - Starting from the last processed event id on daemon startup.
 - Catching any connection errors.
@@ -56,9 +56,9 @@ A plugin handles:
 Advantages of the framework
 ---------------------------
 
-- Only deal with a single polling mechanism, not with polling in many different
-  scripts.
-- Minimize network and database load (only one poller that supplies event to
+- Only deal with a single monitoring mechanism for all scripts, not one per
+  script.
+- Minimize network and database load (only one monitor that supplies event to
   many event processing plugins).
 
 
