@@ -3,6 +3,8 @@ For detailed information please see
 
 http://shotgunsoftware.github.com/shotgunEvents/api.html
 """
+import logging
+
 
 def registerCallbacks(reg):
     """Register all necessary or appropriate callbacks for this plugin."""
@@ -31,6 +33,11 @@ def registerCallbacks(reg):
     eventFilter = None
     reg.registerCallback('$DEMO_SCRIPT_NAME$', '$DEMO_API_KEY$', logArgs, eventFilter, None)
 
+    # Set the logging level for this particular plugin. Let error and above
+    # messages through but block info and lower. This is particularly usefull
+    # for enabling and disabling debugging on a per plugin basis.
+    reg.logger.setLevel(logging.ERROR)
+
 
 def logArgs(sg, logger, event, args):
     """
@@ -41,4 +48,4 @@ def logArgs(sg, logger, event, args):
     @param event: A Shotgun event.
     @param args: The args passed in at the registerCallback call.
     """
-    logger.debug("%s" % str(event))
+    logger.info("%s" % str(event))
