@@ -48,13 +48,7 @@ import daemonizer
 import shotgun_api3 as sg
 
 
-class LogFactory(object):
-    """
-    Logging control and configuration.
-
-    @cvar EMAIL_FORMAT_STRING: The template for an error when sent via email.
-    """
-    EMAIL_FORMAT_STRING = """Time: %(asctime)s
+EMAIL_FORMAT_STRING = """Time: %(asctime)s
 Logger: %(name)s
 Path: %(pathname)s
 Function: %(funcName)s
@@ -62,110 +56,134 @@ Line: %(lineno)d
 
 %(message)s"""
 
-    def __init__(self, config):
-        """
-        @param config: The base configuration options for this L{LogFactory}.
-        @type config: I{ConfigParser.ConfigParser}
-        """
-        self._loggers = []
 
-        # Get configuration options
-        self._smtpServer = config.get('emails', 'server')
-        self._fromAddr = config.get('emails', 'from')
-        self._toAddrs = [s.strip() for s in config.get('emails', 'to').split(',')]
-        self._subject = config.get('emails', 'subject')
-        self._username = None
-        self._password = None
-        if config.has_option('emails', 'username'):
-            self._username = config.get('emails', 'username')
-        if config.has_option('emails', 'password'):
-            self._password = config.get('emails', 'password')
-        self._loggingLevel = config.getint('daemon', 'logging')
+def _setFilePathOnLogger(logger, path):
+    # Remove any previous handler.
+    _removeHandlersFromLogger(logger, logging.handlers.TimedRotatingFileHandler)
 
-        # Setup the file logger at the root
-        loggingPath = config.get('daemon', 'logFile')
-        logger = self.getLogger()
-        logger.setLevel(self._loggingLevel)
-        handler = logging.handlers.TimedRotatingFileHandler(loggingPath, 'midnight', backupCount=10)
-        handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-        logger.addHandler(handler)
+    # Add the file handler
+    handler = logging.handlers.TimedRotatingFileHandler(path, 'midnight', backupCount=10)
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    logger.addHandler(handler)
 
-    def getLogger(self, namespace=None, emails=False):
-        """
-        Create and configure a logger later use.
 
-        @note: If a logger for a given namespace has allready been configured in
-            a specific manner, a second call to this function with the same
-            namespace will completely reconfigure the logger.
+def _removeHandlersFromLogger(logger, handlerTypes=None):
+    """
+    Remove all handlers or handlers of a specified type from a logger.
 
-        @param namespace: The dot delimited namespace of the logger.
-        @type namespace: I{str}
-        @param emails: An indication of how you want the email behavior of this
-            logger to be configured. True will use default email addresses,
-            False will not configure any emailing while a list of addresses
-            will override any default ones.
-        @type emails: A I{list}/I{tuple} of email addresses or I{bool}.
-        """
-        logger = logging.getLogger(namespace)
+    @param logger: The logger who's handlers should be processed.
+    @type logger: A logging.Logger object
+    @param handlerTypes: A type of handler or list/tuple of types of handlers
+        that should be removed from the logger. If I{None}, all handlers are
+        removed.
+    @type handlerTypes: L{None}, a logging.Handler subclass or
+        I{list}/I{tuple} of logging.Handler subclasses.
+    """
+    for handler in logger.handlers:
+        if handlerTypes is None or isinstance(handler, handlerTypes):
+            logger.removeHandler(handler)
 
-        # Configure the logger
-        if emails is False:
-            self.removeHandlersFromLogger(logger, logging.handlers.SMTPHandler)
-        elif emails is True:
-            self.addMailHandlerToLogger(logger, self._toAddrs)
-        elif isinstance(emails, (list, tuple)):
-            self.addMailHandlerToLogger(logger, emails)
+
+def _addMailHandlerToLogger(logger, smtpServer, fromAddr, toAddrs, emailSubject, username=None, password=None):
+    """
+    Configure a logger with a handler that sends emails to specified
+    addresses.
+
+    The format of the email is defined by L{LogFactory.EMAIL_FORMAT_STRING}.
+
+    @note: Any SMTPHandler already connected to the logger will be removed.
+
+    @param logger: The logger to configure
+    @type logger: A logging.Logger instance
+    @param toAddrs: The addresses to send the email to.
+    @type toAddrs: A list of email addresses that will be passed on to the
+        SMTPHandler.
+    """
+    if smtpServer and fromAddr and toAddrs and emailSubject:
+        if username and password:
+            mailHandler = CustomSMTPHandler(smtpServer, fromAddr, toAddrs, emailSubject, (username, password))
         else:
-            msg = 'Argument emails should be True to use the default addresses, False to not send any emails or a list of recipient addresses. Got %s.'
-            raise ValueError(msg % type(emails))
+            mailHandler = CustomSMTPHandler(smtpServer, fromAddr, toAddrs, emailSubject)
 
-        return logger
+        mailHandler.setLevel(logging.ERROR)
+        mailFormatter = logging.Formatter(EMAIL_FORMAT_STRING)
+        mailHandler.setFormatter(mailFormatter)
 
-    @staticmethod
-    def removeHandlersFromLogger(logger, handlerTypes=None):
-        """
-        Remove all handlers or handlers of a specified type from a logger.
+        logger.addHandler(mailHandler)
 
-        @param logger: The logger who's handlers should be processed.
-        @type logger: A logging.Logger object
-        @param handlerTypes: A type of handler or list/tuple of types of handlers
-            that should be removed from the logger. If I{None}, all handlers are
-            removed.
-        @type handlerTypes: L{None}, a logging.Handler subclass or
-            I{list}/I{tuple} of logging.Handler subclasses.
-        """
-        for handler in logger.handlers:
-            if handlerTypes is None or isinstance(handler, handlerTypes):
-                logger.removeHandler(handler)
 
-    def addMailHandlerToLogger(self, logger, toAddrs):
-        """
-        Configure a logger with a handler that sends emails to specified
-        addresses.
+class Config(ConfigParser.ConfigParser):
+    def __init__(self, path):
+        ConfigParser.ConfigParser.__init__(self)
+        self.read(path)
 
-        The format of the email is defined by L{LogFactory.EMAIL_FORMAT_STRING}.
+    def getShotgunURL(self):
+        return self.get('shotgun', 'server')
 
-        @note: Any SMTPHandler already connected to the logger will be removed.
+    def getEngineScriptName(self):
+        return self.get('shotgun', 'name')
 
-        @param logger: The logger to configure
-        @type logger: A logging.Logger instance
-        @param toAddrs: The addresses to send the email to.
-        @type toAddrs: A list of email addresses that will be passed on to the
-            SMTPHandler.
-        """
-        self.removeHandlersFromLogger(logger, logging.handlers.SMTPHandler)
+    def getEngineScriptKey(self):
+        return self.get('shotgun', 'key')
 
-        if self._smtpServer and self._fromAddr and toAddrs and self._subject:
-            if self._username and self._password:
-                mailHandler = CustomSMTPHandler(self._smtpServer, self._fromAddr, toAddrs, self._subject, (self._username, self._password))
+    def getEventIdFile(self):
+        return self.get('daemon', 'eventIdFile')
+
+    def getEnginePIDFile(self):
+        return self.get('daemon', 'pidFile')
+
+    def getPluginPaths(self):
+        return [s.strip() for s in self.get('plugins', 'paths').split(',')]
+
+    def getSMTPServer(self):
+        return self.get('emails', 'server')
+
+    def getFromAddr(self):
+        return self.get('emails', 'from')
+
+    def getToAddrs(self):
+        return [s.strip() for s in self.get('emails', 'to').split(',')]
+
+    def getEmailSubject(self):
+        return self.get('emails', 'subject')
+
+    def getEmailUsername(self):
+        if self.has_option('emails', 'username'):
+            return self.get('emails', 'username')
+        return None
+
+    def getEmailPassword(self):
+        if self.has_option('emails', 'password'):
+            return self.get('emails', 'password')
+        return None
+
+    def getLogMode(self):
+        return self.getint('daemon', 'logMode')
+
+    def getLogLevel(self):
+        return self.getint('daemon', 'logging')
+
+    def getLogFile(self, filename=None):
+        if filename is None:
+            if self.has_option('daemon', 'logFile'):
+                filename = self.get('daemon', 'logFile')
             else:
-                mailHandler = CustomSMTPHandler(self._smtpServer, self._fromAddr, toAddrs, self._subject)
+                raise ConfigError('The config file has no logFile option.')
 
-            mailHandler.setLevel(logging.ERROR)
-            mailFormatter = logging.Formatter(self.EMAIL_FORMAT_STRING)
-            mailHandler.setFormatter(mailFormatter)
+        if self.has_option('daemon', 'logPath'):
+            path = self.get('daemon', 'logPath')
 
-            logger.addHandler(mailHandler)
+            if not os.path.exists(path):
+                os.makedirs(path)
+            elif not os.path.isdir(path):
+                raise ConfigError('The logPath value in the config should point to a directory.')
+
+            path = os.path.join(path, filename)
+
+        else:
+            path = filename
+
+        return path
 
 
 class Engine(daemonizer.Daemon):
@@ -180,47 +198,41 @@ class Engine(daemonizer.Daemon):
         self._eventIdData = {}
 
         # Read/parse the config
-        config = ConfigParser.ConfigParser()
-        config.read(configPath)
+        self.config = Config(configPath)
 
         # Get config values
-        self._logFactory = self._logFactory = LogFactory(config)
-        self._log = self._logFactory.getLogger('engine', emails=True)
-        self._pluginCollections = [PluginCollection(self, s.strip()) for s in config.get('plugins', 'paths').split(',')]
-        self._server = config.get('shotgun', 'server')
-        self._sg = sg.Shotgun(self._server, config.get('shotgun', 'name'), config.get('shotgun', 'key'))
-        self._eventIdFile = config.get('daemon', 'eventIdFile')
-        self._max_conn_retries = config.getint('daemon', 'max_conn_retries')
-        self._conn_retry_sleep = config.getint('daemon', 'conn_retry_sleep')
-        self._fetch_interval = config.getint('daemon', 'fetch_interval')
-        self._use_session_uuid = config.getboolean('shotgun', 'use_session_uuid')
+        self._pluginCollections = [PluginCollection(self, s) for s in self.config.getPluginPaths()]
+        self._sg = sg.Shotgun(
+            self.config.getShotgunURL(),
+            self.config.getEngineScriptName(),
+            self.config.getEngineScriptKey()
+        )
+        self._max_conn_retries = self.config.getint('daemon', 'max_conn_retries')
+        self._conn_retry_sleep = self.config.getint('daemon', 'conn_retry_sleep')
+        self._fetch_interval = self.config.getint('daemon', 'fetch_interval')
+        self._use_session_uuid = self.config.getboolean('shotgun', 'use_session_uuid')
 
-        super(Engine, self).__init__('shotgunEvent', config.get('daemon', 'pidFile'))
+        # Setup the logger for the main engine
+        if self.config.getLogMode() == 0:
+            # Set the root logger for file output.
+            rootLogger = logging.getLogger()
+            rootLogger.config = self.config
+            _setFilePathOnLogger(rootLogger, self.config.getLogFile())
+            print self.config.getLogFile()
 
-    def getShotgunURL(self):
-        """
-        Get the URL of the Shotgun instance this engine will be monitoring.
+            # Set the engine logger for email output.
+            self.log = logging.getLogger('engine')
+            self.setEmailsOnLogger(self.log, True)
+        else:
+            # Set the engine logger for file and email output.
+            self.log = logging.getLogger('engine')
+            self.log.config = self.config
+            _setFilePathOnLogger(self.log, self.config.getLogFile())
+            self.setEmailsOnLogger(self.log, True)
 
-        @return: A url to a Shotgun instance.
-        @rtype: I{str}
-        """
-        return self._server
+        self.log.setLevel(self.config.getLogLevel())
 
-    def getPluginLogger(self, namespace, emails=False):
-        """
-        Get a logger properly setup for a plugin's use.
-
-        @note: The requested namespace will be prefixed with "plugin.".
-
-        @param namespace: The namespace of the logger in the logging hierarchy.
-        @type namespace: I{str}
-        @param emails: See L{LogFactory.getLogger}'s emails argument for info.
-        @type emails: A I{list}/I{tuple} of email addresses or I{bool}.
-
-        @return: A pre-configured logger.
-        @rtype: I{logging.Logger}
-        """
-        return self._logFactory.getLogger('plugin.' + namespace, emails)
+        super(Engine, self).__init__('shotgunEvent', self.config.getEnginePIDFile())
 
     def start(self, daemonize=True):
         if not daemonize:
@@ -230,6 +242,29 @@ class Engine(daemonizer.Daemon):
             logging.getLogger().addHandler(handler)
 
         super(Engine, self).start(daemonize)
+
+    def setEmailsOnLogger(self, logger, emails):
+        # Configure the logger for email output
+        _removeHandlersFromLogger(logger, logging.handlers.SMTPHandler)
+
+        if emails is False:
+            return
+
+        smtpServer = self.config.getSMTPServer()
+        fromAddr = self.config.getFromAddr()
+        emailSubject = self.config.getEmailSubject()
+        username = self.config.getEmailUsername()
+        password = self.config.getEmailPassword()
+
+        if emails is True:
+            toAddrs = self.config.getToAddrs()
+        elif isinstance(emails, (list, tuple)):
+            toAddrs = emails
+        else:
+            msg = 'Argument emails should be True to use the default addresses, False to not send any emails or a list of recipient addresses. Got %s.'
+            raise ValueError(msg % type(emails))
+
+        _addMailHandlerToLogger(logger, smtpServer, fromAddr, toAddrs, emailSubject, username, password)
 
     def _run(self):
         """
@@ -242,7 +277,7 @@ class Engine(daemonizer.Daemon):
         socket.setdefaulttimeout(60)
 
         # Notify which version of shotgun api we are using
-        self._log.info('Using Shotgun version %s' % sg.__version__)
+        self.log.info('Using Shotgun version %s' % sg.__version__)
 
         try:
             for collection in self._pluginCollections:
@@ -252,9 +287,9 @@ class Engine(daemonizer.Daemon):
 
             self._mainLoop()
         except KeyboardInterrupt, err:
-            self._log.warning('Keyboard interrupt. Cleaning up...')
+            self.log.warning('Keyboard interrupt. Cleaning up...')
         except Exception, err:
-            self._log.critical('Crash!!!!! Unexpected error (%s) in main loop.\n\n%s', type(err), traceback.format_exc(err))
+            self.log.critical('Crash!!!!! Unexpected error (%s) in main loop.\n\n%s', type(err), traceback.format_exc(err))
 
     def _loadEventIdData(self):
         """
@@ -265,9 +300,11 @@ class Engine(daemonizer.Daemon):
         contacting Shotgun to get the latest event's id and we'll start
         processing from there.
         """
-        if self._eventIdFile and os.path.exists(self._eventIdFile):
+        eventIdFile = self.config.getEventIdFile()
+
+        if eventIdFile and os.path.exists(eventIdFile):
             try:
-                fh = open(self._eventIdFile)
+                fh = open(eventIdFile)
                 try:
                     self._eventIdData = pickle.load(fh)
 
@@ -283,13 +320,13 @@ class Engine(daemonizer.Daemon):
 
                     # Backwards compatibility:
                     # Reopen the file to try to read an old-style int
-                    fh = open(self._eventIdFile)
+                    fh = open(eventIdFile)
                     line = fh.readline().strip()
                     if line.isdigit():
                         # The _loadEventIdData got an old-style id file containing a single
                         # int which is the last id properly processed.
                         lastEventId = int(line)
-                        self._log.debug('Read last event id (%d) from file.', lastEventId)
+                        self.log.debug('Read last event id (%d) from file.', lastEventId)
                         for collection in self._pluginCollections:
                             collection.setState(lastEventId)
                 fh.close()
@@ -311,7 +348,7 @@ class Engine(daemonizer.Daemon):
                     conn_attempts = self._checkConnectionAttempts(conn_attempts, msg)
                 else:
                     lastEventId = result['id']
-                    self._log.info('Last event id (%d) from the Shotgun database.', lastEventId)
+                    self.log.info('Last event id (%d) from the Shotgun database.', lastEventId)
 
                     for collection in self._pluginCollections:
                         collection.setState(lastEventId)
@@ -340,7 +377,7 @@ class Engine(daemonizer.Daemon):
           execution), skip it.
         - Each time through the loop, if the pidFile is gone, stop.
         """
-        self._log.debug('Starting the event processing loop.')
+        self.log.debug('Starting the event processing loop.')
         while self._continue:
             # Process events
             for event in self._getNewEvents():
@@ -354,7 +391,7 @@ class Engine(daemonizer.Daemon):
             for collection in self._pluginCollections:
                 collection.load()
 
-        self._log.debug('Shuting down event processing loop.')
+        self.log.debug('Shuting down event processing loop.')
 
     def _cleanup(self):
         self._continue = False
@@ -397,25 +434,27 @@ class Engine(daemonizer.Daemon):
         Next time the engine is started it will try to read the event id from
         this location to know at which event it should start processing.
         """
-        if self._eventIdFile is not None:
+        eventIdFile = self.config.getEventIdFile()
+
+        if eventIdFile is not None:
             for collection in self._pluginCollections:
                 self._eventIdData[collection.path] = collection.getState()
 
             try:
-                fh = open(self._eventIdFile, 'w')
+                fh = open(eventIdFile, 'w')
                 pickle.dump(self._eventIdData, fh)
                 fh.close()
             except OSError, err:
-                self._log.error('Can not write event id data to %s.\n\n%s', self._eventIdFile, traceback.format_exc(err))
+                self.log.error('Can not write event id data to %s.\n\n%s', eventIdFile, traceback.format_exc(err))
 
     def _checkConnectionAttempts(self, conn_attempts, msg):
         conn_attempts += 1
         if conn_attempts == self._max_conn_retries:
-            self._log.error('Unable to connect to Shotgun (attempt %s of %s): %s', conn_attempts, self._max_conn_retries, msg)
+            self.log.error('Unable to connect to Shotgun (attempt %s of %s): %s', conn_attempts, self._max_conn_retries, msg)
             conn_attempts = 0
             time.sleep(self._conn_retry_sleep)
         else:
-            self._log.warning('Unable to connect to Shotgun (attempt %s of %s): %s', conn_attempts, self._max_conn_retries, msg)
+            self.log.warning('Unable to connect to Shotgun (attempt %s of %s): %s', conn_attempts, self._max_conn_retries, msg)
         return conn_attempts
 
 
@@ -465,7 +504,7 @@ class PluginCollection(object):
             if plugin.isActive():
                 plugin.process(event)
             else:
-                plugin.getLogger().debug('Skipping: inactive.')
+                plugin.logger.debug('Skipping: inactive.')
 
     def load(self):
         """
@@ -519,12 +558,18 @@ class Plugin(object):
 
         self._pluginName = os.path.splitext(os.path.split(self._path)[1])[0]
         self._active = True
-        self._emails = True
-        self._logger = self._engine.getPluginLogger(self._pluginName, self._emails)
         self._callbacks = []
         self._mtime = None
         self._lastEventId = None
         self._backlog = {}
+
+        # Setup the plugin's logger
+        self.logger = logging.getLogger('plugin.' + self.getName())
+        self.logger.config = self._engine.config
+        self._engine.setEmailsOnLogger(self.logger, True)
+        self.logger.setLevel(self._engine.config.getLogLevel())
+        if self._engine.config.getLogMode() == 1:
+            _setFilePathOnLogger(self.logger, self._engine.config.getLogFile('plugin.' + self.getName()))
 
     def getName(self):
         return self._pluginName
@@ -550,7 +595,7 @@ class Plugin(object):
         for k in self._backlog.keys():
             v = self._backlog[k]
             if v < now:
-                self.getLogger().warning('Timeout elapsed on backlog event id %d.', k)
+                self.logger.warning('Timeout elapsed on backlog event id %d.', k)
                 del(self._backlog[k])
             elif nextId is None or k < nextId:
                 nextId = k
@@ -573,19 +618,7 @@ class Plugin(object):
         @param emails: See L{LogFactory.getLogger}'s emails argument for info.
         @type emails: A I{list}/I{tuple} of email addresses or I{bool}.
         """
-        if emails != self._emails:
-            self._emails = emails
-            self._logger = self._engine.getPluginLogger(self._pluginName, self._emails)
-
-    def getLogger(self):
-        """
-        Get the logger for this plugin.
-
-        @return: The logger configured for this plugin.
-        @rtype: L{logging.Logger}
-        """
-        return self._logger
-    logger = property(getLogger)
+        self._engine.setEmailsOnLogger(self.logger, emails)
 
     def load(self):
         """
@@ -607,9 +640,9 @@ class Plugin(object):
         # Check file mtime
         mtime = os.path.getmtime(self._path)
         if self._mtime is None:
-            self.getLogger().info('Loading plugin at %s' % self._path)
+            self._engine.log.info('Loading plugin at %s' % self._path)
         elif self._mtime < mtime:
-            self.getLogger().info('Reloading plugin at %s' % self._path)
+            self._engine.log.info('Reloading plugin at %s' % self._path)
         else:
             # The mtime of file is equal or older. We don't need to do anything.
             return
@@ -623,7 +656,7 @@ class Plugin(object):
             plugin = imp.load_source(self._pluginName, self._path)
         except:
             self._active = False
-            self._logger.error('Could not load the plugin at %s.\n\n%s', self._path, traceback.format_exc())
+            self.logger.error('Could not load the plugin at %s.\n\n%s', self._path, traceback.format_exc())
             return
 
         regFunc = getattr(plugin, 'registerCallbacks', None)
@@ -631,10 +664,10 @@ class Plugin(object):
             try:
                 regFunc(Registrar(self))
             except:
-                self.getLogger().critical('Error running register callback function from plugin at %s.\n\n%s', self._path, traceback.format_exc())
+                self._engine.log.critical('Error running register callback function from plugin at %s.\n\n%s', self._path, traceback.format_exc())
                 self._active = False
         else:
-            self.getLogger().critical('Did not find a registerCallbacks function in plugin at %s.', self._path)
+            self._engine.log.critical('Did not find a registerCallbacks function in plugin at %s.', self._path)
             self._active = False
 
     def registerCallback(self, sgScriptName, sgScriptKey, callback, matchEvents=None, args=None):
@@ -642,7 +675,7 @@ class Plugin(object):
         Register a callback in the plugin.
         """
         global sg
-        sgConnection = sg.Shotgun(self._engine.getShotgunURL(), sgScriptName, sgScriptKey)
+        sgConnection = sg.Shotgun(self._engine.config.getShotgunURL(), sgScriptName, sgScriptKey)
         self._callbacks.append(Callback(callback, self, self._engine, sgConnection, matchEvents, args))
 
     def process(self, event):
@@ -652,7 +685,7 @@ class Plugin(object):
                 self._updateLastEventId(event['id'])
         elif self._lastEventId is not None and event['id'] <= self._lastEventId:
             msg = 'Event %d is too old. Last event processed was (%d).'
-            self.getLogger().debug(msg, event['id'], self._lastEventId)
+            self.logger.debug(msg, event['id'], self._lastEventId)
         else:
             if self._process(event):
                 self._updateLastEventId(event['id'])
@@ -664,7 +697,7 @@ class Plugin(object):
             if callback.isActive():
                 if callback.canProcess(event):
                     msg = 'Dispatching event %d to callback %s.'
-                    self.getLogger().debug(msg, event['id'], str(callback))
+                    self.logger.debug(msg, event['id'], str(callback))
                     if not callback.process(event):
                         # A callback in the plugin failed. Deactivate the whole
                         # plugin.
@@ -672,7 +705,7 @@ class Plugin(object):
                         break
             else:
                 msg = 'Skipping inactive callback %s in plugin.'
-                self.getLogger().debug(msg, str(callback))
+                self.logger.debug(msg, str(callback))
 
         return self._active
 
@@ -680,7 +713,7 @@ class Plugin(object):
         if self._lastEventId is not None and eventId > self._lastEventId + 1:
             expiration = datetime.datetime.now() + datetime.timedelta(minutes=5)
             for skippedId in range(self._lastEventId + 1, eventId):
-                self.getLogger().debug('Adding event id %d to backlog.', skippedId)
+                self.logger.debug('Adding event id %d to backlog.', skippedId)
                 self._backlog[skippedId] = expiration
         self._lastEventId = eventId
 
@@ -709,7 +742,17 @@ class Registrar(object):
         Wrap a plugin so it can be passed to a user.
         """
         self._plugin = plugin
-        self._allowed = ['logger', 'getLogger', 'setEmails', 'registerCallback']
+        self._allowed = ['logger', 'setEmails', 'registerCallback']
+
+    def getLogger(self):
+        """
+        Get the logger for this plugin.
+
+        @return: The logger configured for this plugin.
+        @rtype: L{logging.Logger}
+        """
+        # TODO: Fix this ugly protected member access
+        return self.logger
 
     def __getattr__(self, name):
         if name in self._allowed:
@@ -761,7 +804,9 @@ class Callback(object):
         else:
             raise ValueError('registerCallback should be called with a function or a callable object instance as callback argument.')
 
-        self._logger = self._engine.getPluginLogger(plugin.getName() + '.' + self._name, False)
+        # TODO: Get rid of this protected member access
+        self._logger = logging.getLogger(plugin.logger.name + '.' + self._name)
+        self._logger.config = self._engine.config
 
     def canProcess(self, event):
         if not self._matchEvents:
@@ -853,6 +898,10 @@ class CustomSMTPHandler(logging.handlers.SMTPHandler):
 
 
 class EventDaemonError(Exception):
+    pass
+
+
+class ConfigError(EventDaemonError):
     pass
 
 
