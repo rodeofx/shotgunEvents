@@ -931,10 +931,25 @@ def _getConfigPath():
     """
     Get the path of the shotgunEventDaemon configuration file.
     """
-    paths = ['$CONFIG_PATH$', '/etc/shotgunEventDaemon.conf']
+    paths = ['/etc']
+
+    # Get the current path of the daemon script
+    scriptPath = sys.argv[0]
+    if scriptPath != '' and scriptPath != '-c':
+        # Make absolute path and eliminate any symlinks if any.
+        scriptPath = os.path.abspath(scriptPath)
+        scriptPath = os.path.realpath(scriptPath)
+
+        # Add the script's directory to the paths we'll search for the config.
+        paths[:0] = [os.path.dirname(scriptPath)]
+
+    # Search for a config file.
     for path in paths:
+        path = os.path.join(path, 'shotgunEventDaemon.conf')
         if os.path.exists(path):
             return path
+
+    # No config file was found
     raise EventDaemonError('Config path not found!')
 
 
