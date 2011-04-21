@@ -390,6 +390,9 @@ class Engine(daemonizer.Daemon):
             # Reload plugins
             for collection in self._pluginCollections:
                 collection.load()
+                
+            # Make sure that newly loaded events have proper state.
+            self._loadEventIdData()
 
         self.log.debug('Shuting down event processing loop.')
 
@@ -408,22 +411,20 @@ class Engine(daemonizer.Daemon):
             if newId is not None and (nextEventId is None or newId < nextEventId):
                 nextEventId = newId
 
-        if nextEventId is None:
-            raise EventDaemonError('Could not find a reference event id to start processing from.')
-
-        filters = [['id', 'greater_than', nextEventId - 1]]
-        fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project', 'session_uuid']
-        order = [{'column':'id', 'direction':'asc'}]
-
-        conn_attempts = 0
-        while True:
-            try:
-                return self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
-            except (sg.ProtocolError, sg.ResponseError, socket.error), err:
-                conn_attempts = self._checkConnectionAttempts(conn_attempts, str(err))
-            except Exception, err:
-                msg = "Unknown error: %s" % str(err)
-                conn_attempts = self._checkConnectionAttempts(conn_attempts, msg)
+        if nextEventId is not None:
+            filters = [['id', 'greater_than', nextEventId - 1]]
+            fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project', 'session_uuid']
+            order = [{'column':'id', 'direction':'asc'}]
+    
+            conn_attempts = 0
+            while True:
+                try:
+                    return self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
+                except (sg.ProtocolError, sg.ResponseError, socket.error), err:
+                    conn_attempts = self._checkConnectionAttempts(conn_attempts, str(err))
+                except Exception, err:
+                    msg = "Unknown error: %s" % str(err)
+                    conn_attempts = self._checkConnectionAttempts(conn_attempts, msg)
 
         return []
 
@@ -440,12 +441,17 @@ class Engine(daemonizer.Daemon):
             for collection in self._pluginCollections:
                 self._eventIdData[collection.path] = collection.getState()
 
-            try:
-                fh = open(eventIdFile, 'w')
-                pickle.dump(self._eventIdData, fh)
-                fh.close()
-            except OSError, err:
-                self.log.error('Can not write event id data to %s.\n\n%s', eventIdFile, traceback.format_exc(err))
+            for colPath, state in self._eventIdData.items():
+                if state:
+                    try:
+                        fh = open(eventIdFile, 'w')
+                        pickle.dump(self._eventIdData, fh)
+                        fh.close()
+                    except OSError, err:
+                        self.log.error('Can not write event id data to %s.\n\n%s', eventIdFile, traceback.format_exc(err))
+                    break
+            else:
+                self.log.warning('No state was found. Not saving to disk.')
 
     def _checkConnectionAttempts(self, conn_attempts, msg):
         conn_attempts += 1
