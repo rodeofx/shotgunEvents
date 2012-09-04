@@ -37,7 +37,7 @@ def flipDownstreamTasks(sg, logger, event, args):
                 ['downstream_tasks', 'is', ds_task],
                 ['sg_status_list', 'is_not', 'fin'],
                 ]
-            if len(sg.find("Task", filters)) > 0:
+            if len(sg.find("Task", us_filters)) > 0:
                 change_status = False
         
         if change_status:
