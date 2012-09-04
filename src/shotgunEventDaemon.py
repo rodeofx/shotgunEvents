@@ -36,7 +36,6 @@ import pprint
 import socket
 import sys
 import time
-import types
 import traceback
 
 try:
@@ -583,7 +582,7 @@ class Plugin(object):
     def setState(self, state):
         if isinstance(state, int):
             self._lastEventId = state
-        elif isinstance(state, types.TupleType):
+        elif isinstance(state, tuple):
             self._lastEventId, self._backlog = state
         else:
             raise ValueError('Unknown state type: %s.' % type(state))
@@ -666,7 +665,7 @@ class Plugin(object):
             return
 
         regFunc = getattr(plugin, 'registerCallbacks', None)
-        if isinstance(regFunc, types.FunctionType):
+        if callable(regFunc):
             try:
                 regFunc(Registrar(self))
             except:
