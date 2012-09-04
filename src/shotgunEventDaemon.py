@@ -781,7 +781,7 @@ class Callback(object):
         @type shotgun: L{sg.Shotgun}
         @param logger: An object to log messages with.
         @type logger: I{logging.Logger}
-        @param matchEvents: The event filter to match events against befor invoking callback.
+        @param matchEvents: The event filter to match events against before invoking callback.
         @type matchEvents: dict
         @param args: Any datastructure you would like to be passed to your
             callback function. Defaults to None.
