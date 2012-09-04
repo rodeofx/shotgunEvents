@@ -955,7 +955,7 @@ def _getConfigPath():
             return path
 
     # No config file was found
-    raise EventDaemonError('Config path not found!')
+    raise EventDaemonError('Config path not found, searched %s' % ', '.join(paths))
 
 
 if __name__ == '__main__':
