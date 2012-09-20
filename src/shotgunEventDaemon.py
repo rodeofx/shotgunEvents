@@ -162,6 +162,11 @@ class Config(ConfigParser.ConfigParser):
     def getLogLevel(self):
         return self.getint('daemon', 'logging')
 
+    def getMaxEventBatchSize(self):
+        if self.has_option('daemon', 'max_event_batch_size'):
+            return self.getint('daemon', 'max_event_batch_size')
+        return 500
+
     def getLogFile(self, filename=None):
         if filename is None:
             if self.has_option('daemon', 'logFile'):
@@ -418,7 +423,9 @@ class Engine(daemonizer.Daemon):
             conn_attempts = 0
             while True:
                 try:
-                    return self._sg.find("EventLogEntry", filters=filters, fields=fields, order=order, filter_operator='all')
+                    return self._sg.find("EventLogEntry", filters, fields, order, limit=self.config.getMaxEventBatchSize())
+                    if events:
+                        self.log.debug('Got %d events: %d to %d.', len(events), events[0]['id'], events[-1]['id'])
                 except (sg.ProtocolError, sg.ResponseError, socket.error), err:
                     conn_attempts = self._checkConnectionAttempts(conn_attempts, str(err))
                 except Exception, err:
