@@ -163,6 +163,12 @@ log-related settings in shotgunEventDaemon.conf to ensure that the ``logging``
 value is set to log INFO level messages and your logArgs plugin is also configured
 to show INFO level messages.
 
+A Note About Logging
+--------------------
+
+It should be noted that log rotation is a feature of the shotgun daemon. Log are
+rotated at midnight every night and ten daily files are kept per plugin.
+
 Next Steps
 **********
 Now you're ready to write your own plugins. There are some additional example
