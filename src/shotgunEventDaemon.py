@@ -720,6 +720,7 @@ class Plugin(object):
     def process(self, event):
         if event['id'] in self._backlog:
             if self._process(event):
+                self.logger.info('Processed id %d from backlog.' % event['id'])
                 del(self._backlog[event['id']])
                 self._updateLastEventId(event['id'])
         elif self._lastEventId is not None and event['id'] <= self._lastEventId:
@@ -752,7 +753,7 @@ class Plugin(object):
         if self._lastEventId is not None and eventId > self._lastEventId + 1:
             expiration = datetime.datetime.now() + datetime.timedelta(minutes=5)
             for skippedId in range(self._lastEventId + 1, eventId):
-                self.logger.debug('Adding event id %d to backlog.', skippedId)
+                self.logger.info('Adding event id %d to backlog.', skippedId)
                 self._backlog[skippedId] = expiration
         self._lastEventId = eventId
 
