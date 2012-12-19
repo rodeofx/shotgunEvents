@@ -46,6 +46,12 @@ try:
 except ImportError:
     import pickle
 
+if sys.platform == 'win32':
+    import win32serviceutil
+    import win32service
+    import win32event
+    import servicemanager
+
 import daemonizer
 import shotgun_api3 as sg
 
@@ -212,7 +218,7 @@ class Config(ConfigParser.ConfigParser):
         return path
 
 
-class Engine(daemonizer.Daemon):
+class Engine(object):
     """
     The engine holds the main loop of event processing.
     """
@@ -258,16 +264,7 @@ class Engine(daemonizer.Daemon):
 
         self.log.setLevel(self.config.getLogLevel())
 
-        super(Engine, self).__init__('shotgunEvent', self.config.getEnginePIDFile())
-
-    def start(self, daemonize=True):
-        if not daemonize:
-            # Setup the stdout logger
-            handler = logging.StreamHandler()
-            handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
-            logging.getLogger().addHandler(handler)
-
-        super(Engine, self).start(daemonize)
+        super(Engine, self).__init__()
 
     def setEmailsOnLogger(self, logger, emails):
         # Configure the logger for email output
@@ -299,7 +296,7 @@ class Engine(daemonizer.Daemon):
             logger, (smtpServer, smtpPort), fromAddr, toAddrs, emailSubject, username, password, secure
         )
 
-    def _run(self):
+    def start(self):
         """
         Start the processing of events.
 
@@ -430,7 +427,7 @@ class Engine(daemonizer.Daemon):
 
         self.log.debug('Shuting down event processing loop.')
 
-    def _cleanup(self):
+    def stop(self):
         self._continue = False
 
     def _getNewEvents(self):
@@ -1019,26 +1016,96 @@ class ConfigError(EventDaemonError):
     pass
 
 
+if sys.platform == 'win32':
+    class WindowsService(win32serviceutil.ServiceFramework):
+        """
+        Windows service wrapper
+        """
+        _svc_name_ = "ShotgunEventDaemon"
+        _svc_display_name_ = "Shotgun Event Handler"
+
+        def __init__(self, args):
+            win32serviceutil.ServiceFramework.__init__(self, args)
+            self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
+            self._engine = Engine(_getConfigPath())
+
+        def SvcStop(self):
+            """
+            Stop the Windows service.
+            """
+            self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+            win32event.SetEvent(self.hWaitStop)
+            self._engine.stop()
+
+        def SvcDoRun(self):
+            """
+            Start the Windows service.
+            """
+            servicemanager.LogMsg(
+                servicemanager.EVENTLOG_INFORMATION_TYPE,
+                servicemanager.PYS_SERVICE_STARTED,
+                (self._svc_name_, '')
+            )
+            self.main()
+
+        def main(self):
+            """
+            Primary Windows entry point
+            """
+            self._engine.start()
+
+
+class LinuxDaemon(daemonizer.Daemon):
+    """
+    Linux Daemon wrapper or wrapper used for foreground operation on Windows
+    """
+    def __init__(self):
+        self._engine = Engine(_getConfigPath())
+        super(LinuxDaemon, self).__init__('shotgunEvent', self._engine.config.getEnginePIDFile())
+
+    def start(self, daemonize=True):
+        if not daemonize:
+            # Setup the stdout logger
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+            logging.getLogger().addHandler(handler)
+
+        super(LinuxDaemon, self).start(daemonize)
+
+    def _run(self):
+        """
+        Start the engine's main loop
+        """
+        self._engine.start()
+
+    def _cleanup(self):
+        self._engine.stop()
+
+
 def main():
-    if len(sys.argv) == 2:
-        daemon = Engine(_getConfigPath())
-
-        # Find the function to call on the daemon
+    """
+    """
+    action = None
+    if len(sys.argv) > 1:
         action = sys.argv[1]
+
+    if sys.platform == 'win32' and action != 'foreground':
+        win32serviceutil.HandleCommandLine(WindowsService)
+        return 0
+
+    if action:
+        daemon = LinuxDaemon()
+
+        # Find the function to call on the daemon and call it
         func = getattr(daemon, action, None)
+        if action[:1] != '_' and func is not None:
+            func()
+            return 0
 
-        # If no function was found, report error.
-        if action[:1] == '_' or func is None:
-            print "Unknown command: %s" % action
-            return 2
+        print "Unknown command: %s" % action
 
-        # Call the requested function
-        func()
-    else:
-        print "usage: %s start|stop|restart|foreground" % sys.argv[0]
-        return 2
-
-    return 0
+    print "usage: %s start|stop|restart|foreground" % sys.argv[0]
+    return 2
 
 
 def _getConfigPath():
