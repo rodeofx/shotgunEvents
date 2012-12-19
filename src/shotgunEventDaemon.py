@@ -295,7 +295,9 @@ class Engine(daemonizer.Daemon):
             msg = 'Argument emails should be True to use the default addresses, False to not send any emails or a list of recipient addresses. Got %s.'
             raise ValueError(msg % type(emails))
 
-        _addMailHandlerToLogger(logger, (smtpServer, smtpPort), fromAddr, toAddrs, emailSubject, username, password, secure)
+        _addMailHandlerToLogger(
+            logger, (smtpServer, smtpPort), fromAddr, toAddrs, emailSubject, username, password, secure
+        )
 
     def _run(self):
         """
@@ -320,7 +322,8 @@ class Engine(daemonizer.Daemon):
         except KeyboardInterrupt, err:
             self.log.warning('Keyboard interrupt. Cleaning up...')
         except Exception, err:
-            self.log.critical('Crash!!!!! Unexpected error (%s) in main loop.\n\n%s', type(err), traceback.format_exc(err))
+            msg = 'Crash!!!!! Unexpected error (%s) in main loop.\n\n%s'
+            self.log.critical(msg, type(err), traceback.format_exc(err))
 
     def _loadEventIdData(self):
         """
