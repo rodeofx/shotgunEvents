@@ -709,13 +709,13 @@ class Plugin(object):
             self._engine.log.critical('Did not find a registerCallbacks function in plugin at %s.', self._path)
             self._active = False
 
-    def registerCallback(self, sgScriptName, sgScriptKey, callback, matchEvents=None, args=None):
+    def registerCallback(self, sgScriptName, sgScriptKey, callback, matchEvents=None, args=None, stopOnError=True):
         """
         Register a callback in the plugin.
         """
         global sg
         sgConnection = sg.Shotgun(self._engine.config.getShotgunURL(), sgScriptName, sgScriptKey)
-        self._callbacks.append(Callback(callback, self, self._engine, sgConnection, matchEvents, args))
+        self._callbacks.append(Callback(callback, self, self._engine, sgConnection, matchEvents, args, stopOnError))
 
     def process(self, event):
         if event['id'] in self._backlog:
@@ -805,7 +805,7 @@ class Callback(object):
     A part of a plugin that can be called to process a Shotgun event.
     """
 
-    def __init__(self, callback, plugin, engine, shotgun, matchEvents=None, args=None):
+    def __init__(self, callback, plugin, engine, shotgun, matchEvents=None, args=None, stopOnError=True):
         """
         @param callback: The function to run when a Shotgun event occurs.
         @type callback: A function object.
@@ -834,6 +834,7 @@ class Callback(object):
         self._logger = None
         self._matchEvents = matchEvents
         self._args = args
+        self._stopOnError = stopOnError
         self._active = True
 
         # Find a name for this object
@@ -895,7 +896,8 @@ class Callback(object):
 
             msg = 'An error occured processing an event.\n\n%s\n\nLocal variables at outer most frame in plugin:\n\n%s'
             self._logger.critical(msg, traceback.format_exc(), pprint.pformat(stack[1].f_locals))
-            self._active = False
+            if self._stopOnError:
+                self._active = False
 
         return self._active
 
