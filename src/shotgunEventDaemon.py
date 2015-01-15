@@ -411,12 +411,16 @@ class Engine(object):
         self.log.debug('Starting the event processing loop.')
         while self._continue:
             # Process events
-            for event in self._getNewEvents():
+            events = self._getNewEvents()
+            for event in events:
                 for collection in self._pluginCollections:
                     collection.process(event)
                 self._saveEventIdData()
 
-            time.sleep(self._fetch_interval)
+            # if we're lagging behind Shotgun, we received a full batch of events
+            # skip the sleep() call in this case
+            if len(events) < self.config.getMaxEventBatchSize():
+                time.sleep(self._fetch_interval)
 
             # Reload plugins
             for collection in self._pluginCollections:
