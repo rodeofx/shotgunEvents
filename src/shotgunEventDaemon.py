@@ -411,12 +411,16 @@ class Engine(object):
         self.log.debug('Starting the event processing loop.')
         while self._continue:
             # Process events
-            for event in self._getNewEvents():
+            events = self._getNewEvents()
+            for event in events:
                 for collection in self._pluginCollections:
                     collection.process(event)
                 self._saveEventIdData()
 
-            time.sleep(self._fetch_interval)
+            # if we're lagging behind Shotgun, we received a full batch of events
+            # skip the sleep() call in this case
+            if len(events) < self.config.getMaxEventBatchSize():
+                time.sleep(self._fetch_interval)
 
             # Reload plugins
             for collection in self._pluginCollections:
@@ -444,7 +448,7 @@ class Engine(object):
 
         if nextEventId is not None:
             filters = [['id', 'greater_than', nextEventId - 1]]
-            fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project', 'session_uuid']
+            fields = ['id', 'event_type', 'attribute_name', 'meta', 'entity', 'user', 'project', 'session_uuid', 'created_at']
             order = [{'column':'id', 'direction':'asc'}]
     
             conn_attempts = 0
@@ -722,13 +726,13 @@ class Plugin(object):
             if self._process(event):
                 self.logger.info('Processed id %d from backlog.' % event['id'])
                 del(self._backlog[event['id']])
-                self._updateLastEventId(event['id'])
+                self._updateLastEventId(event)
         elif self._lastEventId is not None and event['id'] <= self._lastEventId:
             msg = 'Event %d is too old. Last event processed was (%d).'
             self.logger.debug(msg, event['id'], self._lastEventId)
         else:
             if self._process(event):
-                self._updateLastEventId(event['id'])
+                self._updateLastEventId(event)
 
         return self._active
 
@@ -749,13 +753,26 @@ class Plugin(object):
 
         return self._active
 
-    def _updateLastEventId(self, eventId):
-        if self._lastEventId is not None and eventId > self._lastEventId + 1:
-            expiration = datetime.datetime.now() + datetime.timedelta(minutes=5)
-            for skippedId in range(self._lastEventId + 1, eventId):
-                self.logger.info('Adding event id %d to backlog.', skippedId)
-                self._backlog[skippedId] = expiration
-        self._lastEventId = eventId
+    def _updateLastEventId(self, event):
+        BACKLOG_TIMEOUT = 5 # time in minutes after which we consider a pending event won't happen
+        if self._lastEventId is not None and event["id"] > self._lastEventId + 1:
+            event_date = event["created_at"].replace(tzinfo=None)
+            if datetime.datetime.now() > (event_date + datetime.timedelta(minutes=BACKLOG_TIMEOUT)):
+                # the event we've just processed happened more than BACKLOG_TIMEOUT minutes ago so any event
+                # with a lower id should have shown up in the EventLog by now if it actually happened
+                if event["id"]==self._lastEventId+2:
+                    self.logger.info('Event %d never happened - ignoring.', self._lastEventId+1)
+                else:
+                    self.logger.info('Events %d-%d never happened - ignoring.', self._lastEventId+1, event["id"]-1)
+            else:
+                # in this case, we want to add the missing events to the backlog as they could show up in the
+                # EventLog within BACKLOG_TIMEOUT minutes, during which we'll keep asking for the same range
+                # them to show up until they expire
+                expiration = datetime.datetime.now() + datetime.timedelta(minutes=BACKLOG_TIMEOUT)
+                for skippedId in range(self._lastEventId + 1, event["id"]):
+                    self.logger.info('Adding event id %d to backlog.', skippedId)
+                    self._backlog[skippedId] = expiration
+        self._lastEventId = event["id"]
 
     def __iter__(self):
         """
