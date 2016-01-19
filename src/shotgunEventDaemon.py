@@ -366,13 +366,13 @@ class Engine(object):
                                 else:
                                     maxPluginStates[pluginName] = pluginState
 
+                        lastEventId = self._getLastEventIdFromDatabase()
                         for collection in noStateCollections:
                             state = collection.getState()
                             for pluginName in state.keys():
                                 if pluginName in maxPluginStates.keys():
                                     state[pluginName] = maxPluginStates[pluginName]
                                 else:
-                                    lastEventId = self._getLastEventIdFromDatabase()
                                     state[pluginName][0] = latestEventId
                             collection.setState(state)
 
