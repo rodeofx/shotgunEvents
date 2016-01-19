@@ -361,7 +361,7 @@ class Engine(object):
                         for collection in self._eventIdData.values():
                             for pluginName, pluginState in collection.items():
                                 if pluginName in maxPluginStates.keys():
-                                    if v[0] > maxPluginStates[k][0]:
+                                    if pluginState[0] > maxPluginStates[pluginName][0]:
                                         maxPluginStates[pluginName] = pluginState
                                 else:
                                     maxPluginStates[pluginName] = pluginState
@@ -369,7 +369,7 @@ class Engine(object):
                         for collection in noStateCollections:
                             state = collection.getState()
                             for pluginName in state.keys():
-                                if pluginName in maxPluginStates:
+                                if pluginName in maxPluginStates.keys():
                                     state[pluginName] = maxPluginStates[pluginName]
                                 else:
                                     lastEventId = self._getLastEventIdFromDatabase()
