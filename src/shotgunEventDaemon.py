@@ -342,10 +342,40 @@ class Engine(object):
                     # Provide event id info to the plugin collections. Once
                     # they've figured out what to do with it, ask them for their
                     # last processed id.
+                    noStateCollections = []
                     for collection in self._pluginCollections:
                         state = self._eventIdData.get(collection.path)
                         if state:
                             collection.setState(state)
+                        else:
+                            noStateCollections.append(collection)
+
+                    # If we don't have a state it means there's no match
+                    # in the id file. First we'll search to see the latest id a
+                    # matching plugin name has elsewhere in the id file. We do
+                    # this as a fallback in case the plugins directory has been
+                    # moved. If there's no match, use the latest event id 
+                    # in Shotgun.
+                    if noStateCollections:
+                        maxPluginStates = {}
+                        for collection in self._eventIdData.values():
+                            for pluginName, pluginState in collection.items():
+                                if pluginName in maxPluginStates.keys():
+                                    if v[0] > maxPluginStates[k][0]:
+                                        maxPluginStates[pluginName] = pluginState
+                                else:
+                                    maxPluginStates[pluginName] = pluginState
+
+                        for collection in noStateCollections:
+                            state = collection.getState()
+                            for pluginName in state.keys():
+                                if pluginName in maxPluginStates:
+                                    state[pluginName] = maxPluginStates[pluginName]
+                                else:
+                                    lastEventId = self._getLastEventIdFromDatabase()
+                                    state[pluginName][0] = latestEventId
+                            collection.setState(state)
+
                 except pickle.UnpicklingError:
                     fh.close()
 
@@ -366,25 +396,31 @@ class Engine(object):
         else:
             # No id file?
             # Get the event data from the database.
-            conn_attempts = 0
-            lastEventId = None
-            while lastEventId is None:
-                order = [{'column':'id', 'direction':'desc'}]
-                try:
-                    result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
-                except (sg.ProtocolError, sg.ResponseError, socket.error), err:
-                    conn_attempts = self._checkConnectionAttempts(conn_attempts, str(err))
-                except Exception, err:
-                    msg = "Unknown error: %s" % str(err)
-                    conn_attempts = self._checkConnectionAttempts(conn_attempts, msg)
-                else:
-                    lastEventId = result['id']
-                    self.log.info('Last event id (%d) from the Shotgun database.', lastEventId)
-
-                    for collection in self._pluginCollections:
-                        collection.setState(lastEventId)
+            lastEventId = self._getLastEventIdFromDatabase()
+            if lastEventId:
+                for collection in self._pluginCollections:
+                    collection.setState(lastEventId)
 
             self._saveEventIdData()
+
+    def _getLastEventIdFromDatabase(self):
+
+        conn_attempts = 0
+        lastEventId = None
+        while lastEventId is None:
+            order = [{'column':'id', 'direction':'desc'}]
+            try:
+                result = self._sg.find_one("EventLogEntry", filters=[], fields=['id'], order=order)
+            except (sg.ProtocolError, sg.ResponseError, socket.error), err:
+                conn_attempts = self._checkConnectionAttempts(conn_attempts, str(err))
+            except Exception, err:
+                msg = "Unknown error: %s" % str(err)
+                conn_attempts = self._checkConnectionAttempts(conn_attempts, msg)
+            else:
+                lastEventId = result['id']
+                self.log.info('Last event id (%d) from the Shotgun database.', lastEventId)
+
+        return lastEventId
 
     def _mainLoop(self):
         """
